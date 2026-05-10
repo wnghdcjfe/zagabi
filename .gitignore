@@ -1,0 +1,22 @@
+# Runtime / orchestration state
+.omx/state/
+.omx/logs/
+.omx/team/
+
+# Dependencies / build outputs
+node_modules/
+dist/
+build/
+coverage/
+.judge-tmp/
+tmp/
+*.out
+*.exe
+*.o
+
+# Local environment
+.env
+.DS_Store
+
+# Local OMX runtime metadata
+.omx/*.json
