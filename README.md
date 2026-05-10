@@ -1,5 +1,4 @@
-# judge04
-
+# 코딩살구클럽 전용 로컬 채점 서버
 로컬 C++ 채점 서버. `data.json` 기반의 JSON HTTP API.
 
 ## 요구사항
@@ -19,13 +18,11 @@ npm install
 ### 2. 서버 실행
 
 ```bash
-npm start
+HOST=0.0.0.0 PORT=12014 npm start
 ```
 
 - 로컬: `http://127.0.0.1:12014`
 - 헬스체크: `GET /health`
-
-같은 네트워크의 다른 기기에서도 접속해야 하면 `HOST=0.0.0.0 npm start`로 실행한다.
 
 ```bash
 curl http://127.0.0.1:12014/health
@@ -148,3 +145,4 @@ curl -i -X OPTIONS http://127.0.0.1:12014/judge \
 | `CE` | Compile Error |
 | `RE` | Runtime Error |
 | `TLE` | Time Limit Exceeded |
+ 
