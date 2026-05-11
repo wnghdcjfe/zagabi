@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const { after, before, test } = require('node:test');
-const { createApp } = require('../src/app');
+const { DEFAULT_BODY_LIMIT_BYTES, createApp } = require('../src/app');
 
 const acceptedSource = `#include <bits/stdc++.h>
 using namespace std;
@@ -41,7 +41,7 @@ function close(app) {
 }
 
 function request(method, path, options = {}) {
-  const url = new URL(path, baseUrl);
+  const url = new URL(path, options.baseUrl || baseUrl);
   const payload = options.body === undefined ? null : JSON.stringify(options.body);
   return new Promise((resolve, reject) => {
     const req = http.request({
@@ -103,6 +103,27 @@ test('GET /health matches ret.md health body', async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['content-type'], 'application/json; charset=utf-8');
   assert.deepEqual(response.body, { ok: true, service: 'judge_server' });
+});
+
+test('default JSON request body limit is 10MB', () => {
+  assert.equal(DEFAULT_BODY_LIMIT_BYTES, 10 * 1024 * 1024);
+});
+
+test('oversized JSON body returns 413', async () => {
+  const limitedApp = createApp({ bodyLimitBytes: 64 });
+  const started = await listen(limitedApp);
+
+  try {
+    const response = await request('POST', '/judge', {
+      baseUrl: started.baseUrl,
+      body: { payload: 'x'.repeat(128) },
+    });
+
+    assert.equal(response.statusCode, 413);
+    assert.deepEqual(response.body, { ok: false, error: 'request body exceeds 64 bytes' });
+  } finally {
+    await close(started.server);
+  }
 });
 
 test('OPTIONS /judge returns CORS preflight response for allowed origins', async () => {

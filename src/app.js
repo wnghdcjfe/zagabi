@@ -3,7 +3,7 @@
 const http = require('node:http');
 const path = require('node:path');
 
-const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
+const DEFAULT_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_CORS_ORIGINS = [
   'http://127.0.0.1:3100',
   'http://localhost:3100',
