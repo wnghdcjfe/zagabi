@@ -250,6 +250,7 @@ function text(value) {
 function messageForCase(testCase, verdict) {
   if (testCase.error) return String(testCase.error);
   if (verdict === 'time_limit_exceeded') return 'time limit exceeded';
+  if (verdict === 'memory_limit_exceeded') return 'memory limit exceeded';
   if (verdict === 'runtime_error') {
     if (testCase.signal) return `runtime error: signal ${testCase.signal}`;
     if (Number.isInteger(testCase.exitCode)) return `runtime error: exit code ${testCase.exitCode}`;
@@ -257,6 +258,11 @@ function messageForCase(testCase, verdict) {
   }
   if (verdict === 'internal_error') return 'internal judge error';
   return '';
+}
+
+function formatMemory(bytes) {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return null;
+  return (bytes / (1024 * 1024)).toFixed(3);
 }
 
 function buildRuntimeResult(testCase) {
@@ -275,7 +281,7 @@ function buildRuntimeResult(testCase) {
     compileOutput: '',
     message: messageForCase(testCase, verdict),
     time: formatTime(testCase.durationMs),
-    memory: null,
+    memory: formatMemory(testCase.peakMemoryBytes),
   };
 }
 

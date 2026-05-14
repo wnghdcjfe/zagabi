@@ -24,6 +24,10 @@ function loadJudge() {
   }
 }
 
+function loadJudgeModule() {
+  return require('../src/judge');
+}
+
 function verdictOf(result) {
   return String(
     result && (result.verdict || result.status || result.result || result.outcome || result.code) || ''
@@ -78,6 +82,19 @@ test('judge contract returns AC for matching C++ output', async (t) => {
   assert.ok(Array.isArray(result.cases || result.testCases || result.results), 'expected per-case debug details array');
 });
 
+test('judge contract tightens no-additional-time limits without changing accepted output', async (t) => {
+  const result = await runJudgeCase(t, addTwoAccepted, {
+    timeLimit: '2 초 (추가 시간 없음)',
+  });
+  if (!result) return;
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  assert.equal(result.summary.timeLimitMs, 2000);
+  assert.equal(result.summary.effectiveTimeLimitMs, 1500);
+  assert.equal(result.summary.strictTimeLimitRatio, 0.75);
+  assert.equal(result.summary.aggregateTimeLimitMs, 1500);
+});
+
 test('judge contract returns WA for mismatched output', async (t) => {
   const result = await runJudgeCase(t, wrongAnswer);
   if (!result) return;
@@ -104,4 +121,42 @@ test('judge contract returns TLE for non-terminating C++', { timeout: 5000 }, as
   if (!result) return;
 
   assert.equal(verdictOf(result), 'TLE', JSON.stringify(result, null, 2));
+});
+
+test('judge memory policy enforces MLE only on Linux by default', () => {
+  const { resolveMemoryPolicy } = loadJudgeModule();
+
+  const linux = resolveMemoryPolicy({ platform: 'linux', memoryLimitMb: 4 });
+  assert.equal(linux.mode, 'enforced');
+  assert.equal(linux.enforced, true);
+  assert.equal(linux.trackMemory, true);
+
+  for (const platform of ['darwin', 'win32']) {
+    const native = resolveMemoryPolicy({ platform, memoryLimitMb: 4 });
+    assert.equal(native.mode, 'advisory');
+    assert.equal(native.enforced, false);
+    assert.equal(native.trackMemory, false);
+  }
+});
+
+test('judge memory policy can be forced or disabled explicitly', () => {
+  const { resolveMemoryPolicy } = loadJudgeModule();
+
+  const forced = resolveMemoryPolicy({
+    platform: 'darwin',
+    memoryLimitMb: 4,
+    memoryPolicy: 'enforce',
+  });
+  assert.equal(forced.mode, 'enforced');
+  assert.equal(forced.enforced, true);
+  assert.equal(forced.trackMemory, true);
+
+  const disabled = resolveMemoryPolicy({
+    platform: 'linux',
+    memoryLimitMb: 4,
+    memoryPolicy: 'off',
+  });
+  assert.equal(disabled.mode, 'off');
+  assert.equal(disabled.enforced, false);
+  assert.equal(disabled.trackMemory, false);
 });

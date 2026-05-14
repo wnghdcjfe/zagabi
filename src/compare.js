@@ -18,6 +18,7 @@ function compareOutputs(actual, expected) {
     ok: normalizedActual === normalizedExpected,
     actual: normalizedActual,
     expected: normalizedExpected,
+    mode: 'exact',
   };
 }
 

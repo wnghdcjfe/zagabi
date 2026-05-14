@@ -3,12 +3,14 @@
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { compareOutputs } = require('./compare');
 const { runProcess } = require('./processRunner');
 
 const DEFAULT_DATA_PATH = path.resolve(process.cwd(), 'data.json');
 const DEFAULT_COMPILE_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
-const VERDICT_PRIORITY = ['TLE', 'RE', 'WA'];
+const DEFAULT_NO_ADDITIONAL_TIME_RATIO = 0.75;
+const VERDICT_PRIORITY = ['TLE', 'MLE', 'RE', 'WA'];
 
 function parseTimeLimitMs(value, fallbackMs = 1_000) {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, value);
@@ -37,6 +39,119 @@ function parseMemoryLimitMb(value, fallbackMb = null) {
   if (normalized.includes('gb') || normalized.includes('기가')) return Math.max(1, Math.round(amount * 1024));
   if (normalized.includes('kb') || normalized.includes('킬로')) return Math.max(1, Math.round(amount / 1024));
   return Math.max(1, Math.round(amount));
+}
+
+function hasNoAdditionalTime(value) {
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized.includes('추가 시간 없음')
+    || normalized.includes('추가시간없음')
+    || normalized.includes('no additional time');
+}
+
+function normalizeRatio(value, fallback = 1) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(1, Math.max(0.01, value));
+}
+
+function resolveEffectiveTimeLimitMs(problem, judgeOptions, timeLimitMs) {
+  const strictRatio = judgeOptions.strictTimeLimitRatio !== undefined
+    ? normalizeRatio(Number(judgeOptions.strictTimeLimitRatio))
+    : hasNoAdditionalTime(problem.timeLimit)
+      ? DEFAULT_NO_ADDITIONAL_TIME_RATIO
+      : 1;
+  return {
+    strictRatio,
+    effectiveTimeLimitMs: Math.max(1, Math.floor(timeLimitMs * strictRatio)),
+  };
+}
+
+function resolveAggregateTimeLimitMs(problem, judgeOptions, effectiveTimeLimitMs) {
+  if (judgeOptions.aggregateTimeLimitMs === null || judgeOptions.aggregateTimeLimitMs === false) {
+    return null;
+  }
+  if (Number.isFinite(judgeOptions.aggregateTimeLimitMs)) {
+    return Math.max(1, Math.floor(judgeOptions.aggregateTimeLimitMs));
+  }
+  return hasNoAdditionalTime(problem.timeLimit) ? effectiveTimeLimitMs : null;
+}
+
+function normalizeMemoryPolicy(value) {
+  const normalized = String(value || 'auto').trim().toLowerCase();
+  if (['enforce', 'enforced', 'strict', 'on', 'true'].includes(normalized)) return 'enforce';
+  if (['advisory', 'warn', 'warning', 'report'].includes(normalized)) return 'advisory';
+  if (['off', 'false', 'none', 'disabled'].includes(normalized)) return 'off';
+  return 'auto';
+}
+
+function resolveMemoryPolicy(options = {}) {
+  const platform = options.platform || process.platform;
+  const memoryLimitMb = Number(options.memoryLimitMb);
+  const hasMemoryLimit = Number.isFinite(memoryLimitMb) && memoryLimitMb > 0;
+  const requestedPolicy = normalizeMemoryPolicy(options.memoryPolicy);
+  const memoryLimitBytes = hasMemoryLimit ? memoryLimitMb * 1024 * 1024 : null;
+
+  if (!hasMemoryLimit || requestedPolicy === 'off') {
+    return {
+      platform,
+      mode: 'off',
+      enforced: false,
+      trackMemory: false,
+      memoryLimitMb: hasMemoryLimit ? memoryLimitMb : null,
+      memoryLimitBytes,
+      reason: hasMemoryLimit ? 'memory check disabled' : 'no memory limit configured',
+    };
+  }
+
+  if (requestedPolicy === 'enforce') {
+    return {
+      platform,
+      mode: 'enforced',
+      enforced: true,
+      trackMemory: platform !== 'win32',
+      memoryLimitMb,
+      memoryLimitBytes,
+      reason: platform === 'win32'
+        ? 'forced memory enforcement requested, but native Windows memory sampling is unavailable'
+        : 'memory enforcement forced by judge option',
+    };
+  }
+
+  if (requestedPolicy === 'advisory') {
+    return {
+      platform,
+      mode: 'advisory',
+      enforced: false,
+      trackMemory: platform !== 'win32',
+      memoryLimitMb,
+      memoryLimitBytes,
+      reason: 'memory is reported only by judge option',
+    };
+  }
+
+  if (platform === 'linux') {
+    return {
+      platform,
+      mode: 'enforced',
+      enforced: true,
+      trackMemory: true,
+      memoryLimitMb,
+      memoryLimitBytes,
+      reason: 'Linux memory sampling is close enough to enforce local MLE',
+    };
+  }
+
+  return {
+    platform,
+    mode: 'advisory',
+    enforced: false,
+    trackMemory: false,
+    memoryLimitMb,
+    memoryLimitBytes,
+    reason: platform === 'win32'
+      ? 'native Windows process memory does not match BOJ Linux memory accounting'
+      : 'native macOS process memory includes platform/runtime overhead unlike BOJ Linux',
+  };
 }
 
 function normalizeOutput(value) {
@@ -87,13 +202,23 @@ function buildCompileSummary(result, commandText) {
   };
 }
 
-function buildCaseResult(testCase, index, run) {
+function buildCaseResult(testCase, index, run, policy = {}) {
   let status;
-  if (run.timedOut) {
+  const comparison = compareOutputs(run.stdout, testCase.output);
+  const memoryPolicy = policy.memoryPolicy || resolveMemoryPolicy();
+  const memoryExceeded = Boolean(
+    memoryPolicy.enforced
+    && Number.isFinite(memoryPolicy.memoryLimitBytes)
+    && Number.isFinite(run.peakMemoryBytes)
+    && run.peakMemoryBytes > memoryPolicy.memoryLimitBytes
+  );
+  if (run.timedOut || policy.aggregateTimedOut) {
     status = 'TLE';
+  } else if (memoryExceeded) {
+    status = 'MLE';
   } else if (run.error || run.exitCode !== 0) {
     status = 'RE';
-  } else if (normalizeOutput(run.stdout) !== normalizeOutput(testCase.output)) {
+  } else if (!comparison.ok) {
     status = 'WA';
   } else {
     status = 'AC';
@@ -108,11 +233,18 @@ function buildCaseResult(testCase, index, run) {
     stderr: run.stderr,
     exitCode: run.exitCode,
     signal: run.signal,
-    timedOut: run.timedOut,
+    timedOut: run.timedOut || Boolean(policy.aggregateTimedOut),
     durationMs: run.durationMs,
+    peakMemoryBytes: run.peakMemoryBytes,
+    memorySampleAvailable: run.memorySampleAvailable,
+    memoryLimitBytes: memoryPolicy.memoryLimitBytes,
+    memoryCheckMode: memoryPolicy.mode,
+    memoryCheckEnforced: memoryPolicy.enforced,
+    memoryExceeded,
     stdoutTruncated: run.stdoutTruncated,
     stderrTruncated: run.stderrTruncated,
     error: run.error,
+    compareMode: comparison.mode,
   };
 }
 
@@ -152,6 +284,7 @@ function resolveSubmissionInput(sourceCodeOrRequest, options = {}) {
       ...(request.dataPath ? { dataPath: request.dataPath } : {}),
       ...(request.timeLimitMs ? { timeLimitMs: request.timeLimitMs } : {}),
       ...(request.memoryLimitMb ? { memoryLimitMb: request.memoryLimitMb } : {}),
+      ...(request.memoryPolicy ? { memoryPolicy: request.memoryPolicy } : {}),
       ...(request.keepTemp !== undefined ? { keepTemp: request.keepTemp } : {}),
     },
   };
@@ -170,7 +303,22 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
   }
 
   const timeLimitMs = judgeOptions.timeLimitMs || parseTimeLimitMs(problem.timeLimit);
+  const { strictRatio, effectiveTimeLimitMs } = resolveEffectiveTimeLimitMs(
+    problem,
+    judgeOptions,
+    timeLimitMs,
+  );
+  const aggregateTimeLimitMs = resolveAggregateTimeLimitMs(
+    problem,
+    judgeOptions,
+    effectiveTimeLimitMs,
+  );
   const memoryLimitMb = judgeOptions.memoryLimitMb || parseMemoryLimitMb(problem.memoryLimit);
+  const memoryPolicy = resolveMemoryPolicy({
+    platform: judgeOptions.platform || process.platform,
+    memoryLimitMb,
+    memoryPolicy: judgeOptions.memoryPolicy,
+  });
   const maxOutputBytes = judgeOptions.maxOutputBytes || DEFAULT_MAX_OUTPUT_BYTES;
   const tempRoot = judgeOptions.tempRoot || os.tmpdir();
   const workDir = await fs.mkdtemp(path.join(tempRoot, 'judge-cpp-'));
@@ -190,6 +338,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
   let compile;
   let cases = [];
   let verdict = 'AC';
+  let aggregateRuntimeMs = 0;
 
   try {
     await fs.writeFile(sourcePath, submissionSource, 'utf8');
@@ -208,13 +357,29 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     } else {
       for (let index = 0; index < problem.testCases.length; index += 1) {
         const testCase = problem.testCases[index];
+        const remainingAggregateMs = aggregateTimeLimitMs === null
+          ? null
+          : aggregateTimeLimitMs - aggregateRuntimeMs;
+        const caseTimeoutMs = remainingAggregateMs === null
+          ? effectiveTimeLimitMs
+          : Math.max(1, Math.min(effectiveTimeLimitMs, remainingAggregateMs));
         const run = await runProcess(binaryPath, [], {
           cwd: workDir,
           input: String(testCase.input ?? ''),
-          timeoutMs: timeLimitMs,
+          timeoutMs: caseTimeoutMs,
           maxOutputBytes,
+          trackCpuTime: true,
+          trackMemory: memoryPolicy.trackMemory,
         });
-        cases.push(buildCaseResult(testCase, index, run));
+        const accountedRuntimeMs = Math.max(run.durationMs, run.cpuTimeMs || 0);
+        aggregateRuntimeMs += accountedRuntimeMs;
+        const aggregateTimedOut = aggregateTimeLimitMs !== null
+          && aggregateRuntimeMs >= aggregateTimeLimitMs
+          && !run.timedOut;
+        cases.push(buildCaseResult(testCase, index, run, {
+          aggregateTimedOut,
+          memoryPolicy,
+        }));
       }
       verdict = finalVerdictFromCases(cases);
     }
@@ -235,7 +400,12 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
       passed: cases.filter((testCase) => testCase.status === 'AC').length,
       total: problem.testCases.length,
       timeLimitMs,
+      effectiveTimeLimitMs,
+      strictTimeLimitRatio: strictRatio,
+      aggregateTimeLimitMs,
+      aggregateRuntimeMs: Math.round(aggregateRuntimeMs),
       memoryLimitMb,
+      memoryPolicy,
       tempDirCleaned: judgeOptions.keepTemp !== true,
     },
     compile,
@@ -248,6 +418,8 @@ module.exports = {
   loadProblem,
   parseTimeLimitMs,
   parseMemoryLimitMb,
+  hasNoAdditionalTime,
+  resolveMemoryPolicy,
   normalizeOutput,
   resolveSubmissionInput,
 };
