@@ -9,7 +9,9 @@ const { runProcess } = require('./processRunner');
 
 const DEFAULT_DATA_PATH = path.resolve(process.cwd(), 'data.json');
 const DEFAULT_COMPILE_TIMEOUT_MS = 10_000;
+const DEFAULT_WINDOWS_COMPILE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+const DEFAULT_CPP_STANDARD = 'gnu++17';
 const DEFAULT_NO_ADDITIONAL_TIME_RATIO = 0.75;
 const SOURCE_FILE_NAME = 'main.cpp';
 const POSIX_BINARY_FILE_NAME = 'main';
@@ -24,6 +26,29 @@ const WINDOWS_COMPILER_CANDIDATES = [
   'C:\\MinGW\\bin\\g++.exe',
   'C:\\ProgramData\\chocolatey\\bin\\g++.exe',
 ];
+
+const CPP_LANGUAGE_STANDARDS = new Map([
+  ['c++', DEFAULT_CPP_STANDARD],
+  ['cpp', DEFAULT_CPP_STANDARD],
+  ['cxx', DEFAULT_CPP_STANDARD],
+  ['cplusplus', DEFAULT_CPP_STANDARD],
+  ['c++17', 'gnu++17'],
+  ['cpp17', 'gnu++17'],
+  ['cxx17', 'gnu++17'],
+  ['cplusplus17', 'gnu++17'],
+  ['gnuc++17', 'gnu++17'],
+  ['gnucpp17', 'gnu++17'],
+  ['gnu++17', 'gnu++17'],
+  ['c++20', 'gnu++20'],
+  ['cpp20', 'gnu++20'],
+  ['cxx20', 'gnu++20'],
+  ['cplusplus20', 'gnu++20'],
+  ['gnuc++20', 'gnu++20'],
+  ['gnucpp20', 'gnu++20'],
+  ['gnu++20', 'gnu++20'],
+  ['c++2a', 'gnu++20'],
+  ['gnu++2a', 'gnu++20'],
+]);
 
 function parseTimeLimitMs(value, fallbackMs = 1_000) {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, value);
@@ -60,6 +85,79 @@ function hasNoAdditionalTime(value) {
   return normalized.includes('추가 시간 없음')
     || normalized.includes('추가시간없음')
     || normalized.includes('no additional time');
+}
+
+function parsePositiveInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+function defaultCompileTimeoutMsForPlatform(platform = process.platform, env = process.env) {
+  const configured = parsePositiveInteger(env && env.JUDGE_COMPILE_TIMEOUT_MS);
+  if (configured !== null) return configured;
+  return platform === 'win32' ? DEFAULT_WINDOWS_COMPILE_TIMEOUT_MS : DEFAULT_COMPILE_TIMEOUT_MS;
+}
+
+function normalizeCppLanguage(value) {
+  if (value === undefined || value === null || value === '') return DEFAULT_CPP_STANDARD;
+  const normalized = String(value).trim().toLowerCase().replace(/\s+/g, '');
+  return CPP_LANGUAGE_STANDARDS.get(normalized) || null;
+}
+
+function cppStandardForLanguage(value, fallback = DEFAULT_CPP_STANDARD) {
+  return normalizeCppLanguage(value) || fallback;
+}
+
+function stripWrappingQuotes(value) {
+  const trimmed = String(value || '').trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === '\'' && last === '\'')) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+function normalizeSubmissionSource(source) {
+  let normalized = String(source ?? '')
+    .replace(/^\uFEFF/u, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  const fenced = normalized.trim().match(/^(```+|~~~+)[^\n]*\n([\s\S]*?)\n\1\s*$/u);
+  if (fenced) {
+    normalized = fenced[2].replace(/^\uFEFF/u, '');
+  }
+
+  return normalized
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B\u200C\u200D\u2060]/gu, '');
+}
+
+function hasRiskyWindowsPathCharacters(value) {
+  return /[^\x20-\x7E]|\s/u.test(String(value || ''));
+}
+
+function resolveTempRoot(options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  const explicitTempRoot = options.tempRoot || env.JUDGE_TEMP_ROOT;
+  if (explicitTempRoot) return String(explicitTempRoot);
+
+  const systemTempRoot = options.systemTempRoot || os.tmpdir();
+  if (platform !== 'win32' || !hasRiskyWindowsPathCharacters(systemTempRoot)) {
+    return systemTempRoot;
+  }
+
+  const cwd = options.cwd || process.cwd();
+  if (hasRiskyWindowsPathCharacters(cwd)) {
+    return systemTempRoot;
+  }
+
+  return path.win32.join(cwd, '.judge-tmp');
 }
 
 function normalizeRatio(value, fallback = 1) {
@@ -184,7 +282,8 @@ function buildDefaultCompileArgs(options = {}) {
   const platform = options.platform || process.platform;
   const sourceFileName = options.sourceFileName || SOURCE_FILE_NAME;
   const binaryFileName = options.binaryFileName || binaryFileNameForPlatform(platform);
-  const args = ['-std=c++17', '-O2'];
+  const standard = cppStandardForLanguage(options.language || options.standard);
+  const args = [`-std=${standard}`, '-O2'];
 
   if (platform !== 'win32') {
     args.push('-pipe');
@@ -228,23 +327,24 @@ async function findExecutableOnPath(command, options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
   const pathApi = platform === 'win32' ? path.win32 : path;
+  const executable = stripWrappingQuotes(command);
 
-  if (!command || hasPathSeparator(command) || pathApi.isAbsolute(command)) {
-    return await canAccessFile(command) ? command : null;
+  if (!executable || hasPathSeparator(executable) || pathApi.isAbsolute(executable)) {
+    return await canAccessFile(executable) ? executable : null;
   }
 
   const pathValue = env.PATH || env.Path || env.path || '';
   const pathDelimiter = platform === 'win32' ? ';' : path.delimiter;
   const pathDirs = pathValue.split(pathDelimiter).filter(Boolean);
   const extensions = platform === 'win32' ? windowsPathExts(env) : [''];
-  const commandLower = command.toLowerCase();
+  const commandLower = executable.toLowerCase();
   const alreadyHasWindowsExt = platform === 'win32'
     && windowsPathExts(env).some((ext) => ext && commandLower.endsWith(ext.toLowerCase()));
 
   for (const dir of pathDirs) {
     for (const ext of extensions) {
       if (alreadyHasWindowsExt && ext) continue;
-      const candidate = pathApi.join(dir, `${command}${ext}`);
+      const candidate = pathApi.join(dir, `${executable}${ext}`);
       if (await canAccessFile(candidate)) return candidate;
     }
   }
@@ -254,9 +354,9 @@ async function findExecutableOnPath(command, options = {}) {
 
 async function resolveCompiler(options = {}) {
   const platform = options.platform || process.platform;
-  const env = options.env || process.env;
+  const env = options.env ? { ...process.env, ...options.env } : process.env;
   const explicitCompiler = options.compiler || env.JUDGE_CXX || env.CXX;
-  if (explicitCompiler) return String(explicitCompiler).trim();
+  if (explicitCompiler) return stripWrappingQuotes(explicitCompiler);
 
   if (platform !== 'win32') return 'g++';
 
@@ -310,6 +410,16 @@ function buildCompileSummary(result, commandText) {
     stderrTruncated: result.stderrTruncated,
     error: result.error,
   };
+}
+
+function formatCompileLog(compile) {
+  const details = [
+    compile?.stdout,
+    compile?.stderr,
+    compile?.timedOut ? `compiler timed out after ${compile.durationMs} ms` : '',
+    compile?.error,
+  ];
+  return details.filter(Boolean).join('\n');
 }
 
 function buildCaseResult(testCase, index, run, policy = {}) {
@@ -379,18 +489,21 @@ function resolveSubmissionInput(sourceCodeOrRequest, options = {}) {
       ? {
           problemId: request.problemId,
           sourceCode: request.sourceCode,
+          language: request.language ?? request.lang,
           testCases: request.testCases,
           timeLimit: request.timeLimit,
           memoryLimit: request.memoryLimit,
         }
       : undefined
   );
+  const language = request.language ?? request.lang ?? problem?.language;
 
   return {
     sourceCode: request.sourceCode,
     options: {
       ...options,
       ...(problem ? { problem } : {}),
+      ...(language ? { language } : {}),
       ...(request.dataPath ? { dataPath: request.dataPath } : {}),
       ...(request.timeLimitMs ? { timeLimitMs: request.timeLimitMs } : {}),
       ...(request.memoryLimitMb ? { memoryLimitMb: request.memoryLimitMb } : {}),
@@ -407,8 +520,12 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
   const problem = judgeOptions.problem || await loadProblem(judgeOptions.dataPath);
   validateProblem(problem);
 
-  const submissionSource = sourceCode ?? problem.sourceCode;
-  if (typeof submissionSource !== 'string' || submissionSource.trim() === '') {
+  const rawSubmissionSource = sourceCode ?? problem.sourceCode;
+  if (typeof rawSubmissionSource !== 'string') {
+    throw new Error('sourceCode is required either in the request or data.json');
+  }
+  const submissionSource = normalizeSubmissionSource(rawSubmissionSource);
+  if (submissionSource.trim() === '') {
     throw new Error('sourceCode is required either in the request or data.json');
   }
 
@@ -430,18 +547,26 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     memoryPolicy: judgeOptions.memoryPolicy,
   });
   const maxOutputBytes = judgeOptions.maxOutputBytes || DEFAULT_MAX_OUTPUT_BYTES;
-  const tempRoot = judgeOptions.tempRoot || os.tmpdir();
-  const workDir = await fs.mkdtemp(path.join(tempRoot, 'judge-cpp-'));
   const runtimePlatform = process.platform;
+  const runnerEnv = judgeOptions.env ? { ...process.env, ...judgeOptions.env } : process.env;
+  const tempRoot = resolveTempRoot({
+    tempRoot: judgeOptions.tempRoot,
+    env: runnerEnv,
+    platform: runtimePlatform,
+    cwd: judgeOptions.cwd,
+  });
+  await fs.mkdir(tempRoot, { recursive: true });
+  const workDir = await fs.mkdtemp(path.join(tempRoot, 'judge-cpp-'));
   const binaryFileName = binaryFileNameForPlatform(runtimePlatform);
   const sourcePath = path.join(workDir, SOURCE_FILE_NAME);
   const compiler = await resolveCompiler({
     compiler: judgeOptions.compiler,
-    env: judgeOptions.env,
+    env: runnerEnv,
     platform: runtimePlatform,
   });
   const compileArgs = judgeOptions.compileArgs || buildDefaultCompileArgs({
     platform: runtimePlatform,
+    language: judgeOptions.language || problem.language,
     sourceFileName: SOURCE_FILE_NAME,
     binaryFileName,
   });
@@ -460,7 +585,8 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
       await runProcess(compiler, compileArgs, {
         cwd: workDir,
         env: judgeOptions.env,
-        timeoutMs: judgeOptions.compileTimeoutMs || DEFAULT_COMPILE_TIMEOUT_MS,
+        timeoutMs: judgeOptions.compileTimeoutMs
+          || defaultCompileTimeoutMsForPlatform(runtimePlatform, runnerEnv),
         maxOutputBytes,
       }),
       compileCommand,
@@ -508,7 +634,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     problemId: problem.problemId,
     verdict,
     ...(verdict === 'CE' ? {
-      compileLog: [compile?.stdout, compile?.stderr].filter(Boolean).join('\n'),
+      compileLog: formatCompileLog(compile),
       stderr: compile?.stderr || '',
     } : {}),
     summary: {
@@ -536,10 +662,15 @@ module.exports = {
   hasNoAdditionalTime,
   resolveMemoryPolicy,
   normalizeOutput,
+  normalizeSubmissionSource,
   resolveSubmissionInput,
   binaryFileNameForPlatform,
   buildDefaultCompileArgs,
   executableCommandForFile,
+  defaultCompileTimeoutMsForPlatform,
   findExecutableOnPath,
+  resolveTempRoot,
   resolveCompiler,
+  stripWrappingQuotes,
+  cppStandardForLanguage,
 };

@@ -1,7 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
 const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
 const { after, before, test } = require('node:test');
 const { DEFAULT_BODY_LIMIT_BYTES, createApp } = require('../src/app');
 
@@ -224,4 +227,41 @@ test('unsupported language returns C++ only validation error', async () => {
   });
   assert.equal(response.statusCode, 400);
   assert.deepEqual(response.body, { ok: false, error: 'only C++ submissions are supported' });
+});
+
+test('validateJudgeRequest normalizes C++20 language for judge module', () => {
+  const { validateJudgeRequest } = require('../src/app');
+  const problem = validateJudgeRequest(judgePayload({ language: 'GNU C++20' }));
+  assert.equal(problem.language, 'gnu++20');
+});
+
+test('runJudge forwards normalized language to judge module', async (t) => {
+  const { runJudge } = require('../src/app');
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'judge-app-fake-'));
+  t.after(() => fs.rm(tempDir, { recursive: true, force: true }));
+  const fakeJudgePath = path.join(tempDir, 'judge.js');
+  await fs.writeFile(fakeJudgePath, `
+    'use strict';
+    module.exports.judgeSubmission = async function judgeSubmission(request) {
+      return {
+        verdict: request.language === 'gnu++20' && request.problem.language === 'gnu++20' ? 'AC' : 'WA',
+        cases: [{
+          index: 1,
+          status: request.language === 'gnu++20' ? 'AC' : 'WA',
+          input: '',
+          expected: '',
+          actual: '',
+          stderr: '',
+          durationMs: 0,
+          exitCode: 0
+        }]
+      };
+    };
+  `);
+
+  const result = await runJudge({
+    body: judgePayload({ language: 'GNU C++20' }),
+    judgePath: fakeJudgePath,
+  });
+  assert.equal(result.verdict, 'accepted');
 });

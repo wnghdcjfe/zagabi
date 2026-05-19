@@ -13,10 +13,16 @@
 
 ```powershell
 $env:JUDGE_CXX="C:\msys64\ucrt64\bin\g++.exe"
+$env:JUDGE_COMPILE_TIMEOUT_MS="30000"
 $env:HOST="0.0.0.0"
 $env:PORT="12014"
 npm start
 ```
+
+- Windows 기본 컴파일 제한은 MinGW/MSYS2 지연을 고려해 30초입니다.
+- 사용자명/Temp 경로에 한글·공백이 있어 `g++`가 파일을 못 여는 경우, 서버는 자동으로 프로젝트의 `.judge-tmp`를 우선 사용합니다. 필요하면 `$env:JUDGE_TEMP_ROOT="C:\judge-tmp"`처럼 직접 지정할 수 있습니다.
+- 복사한 해설 코드에 붙은 Markdown 코드블록 fence, BOM, NBSP 같은 보이지 않는 문자는 컴파일 전 안전하게 정리됩니다.
+- `language`가 `C++20`/`gnu++20`이면 `-std=gnu++20`, 기본값은 BOJ와 가까운 `-std=gnu++17`입니다.
 
 ## 실행법
 

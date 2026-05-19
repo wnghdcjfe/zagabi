@@ -109,23 +109,82 @@ test('judge contract compiles from temp paths with spaces and non-ASCII characte
 test('default compile args avoid Windows-only path and pipe pitfalls', () => {
   const {
     binaryFileNameForPlatform,
+    cppStandardForLanguage,
     buildDefaultCompileArgs,
     executableCommandForFile,
   } = loadJudgeModule();
 
   const winArgs = buildDefaultCompileArgs({ platform: 'win32' });
   assert.equal(binaryFileNameForPlatform('win32'), 'main.exe');
+  assert.equal(winArgs[0], '-std=gnu++17');
   assert.equal(winArgs.includes('-pipe'), false);
   assert.ok(winArgs.includes('-finput-charset=UTF-8'));
   assert.ok(winArgs.includes('-fexec-charset=UTF-8'));
   assert.deepEqual(winArgs.slice(-3), ['main.cpp', '-o', 'main.exe']);
+  assert.equal(cppStandardForLanguage('gnu++20'), 'gnu++20');
+  assert.equal(buildDefaultCompileArgs({ platform: 'win32', language: 'gnu++20' })[0], '-std=gnu++20');
 
   const posixArgs = buildDefaultCompileArgs({ platform: 'linux' });
   assert.equal(binaryFileNameForPlatform('linux'), 'main');
+  assert.equal(posixArgs[0], '-std=gnu++17');
   assert.equal(posixArgs.includes('-pipe'), true);
   assert.deepEqual(posixArgs.slice(-3), ['main.cpp', '-o', 'main']);
   assert.equal(executableCommandForFile('main', 'linux'), './main');
   assert.equal(executableCommandForFile('main.exe', 'win32'), '.\\main.exe');
+});
+
+test('judge contract normalizes copied explanation code before compiling', async (t) => {
+  const { judgeSubmission, normalizeSubmissionSource } = loadJudgeModule();
+  const copiedExplanationCode = [
+    '```cpp',
+    '\uFEFF#include <bits/stdc++.h>',
+    'using namespace std;',
+    'int main(){ int a\u00A0=\u00A040; cout << a + 2 << "\\n"; }',
+    '```',
+    '',
+  ].join('\r\n');
+
+  assert.doesNotMatch(normalizeSubmissionSource(copiedExplanationCode), /```|\uFEFF|\u00A0/);
+
+  const result = await judgeSubmission({
+    problemId: 'contract-copied-source',
+    sourceCode: copiedExplanationCode,
+    language: 'cpp',
+    timeLimit: '1 초',
+    memoryLimit: '128 MB',
+    testCases: [
+      { input: '', output: '42\n' },
+    ],
+  });
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+});
+
+test('Windows compile defaults avoid slow MinGW and risky temp path failures', () => {
+  const {
+    defaultCompileTimeoutMsForPlatform,
+    resolveTempRoot,
+    stripWrappingQuotes,
+  } = loadJudgeModule();
+
+  assert.equal(defaultCompileTimeoutMsForPlatform('linux', {}), 10_000);
+  assert.equal(defaultCompileTimeoutMsForPlatform('win32', {}), 30_000);
+  assert.equal(defaultCompileTimeoutMsForPlatform('win32', {
+    JUDGE_COMPILE_TIMEOUT_MS: '45000',
+  }), 45_000);
+  assert.equal(stripWrappingQuotes('"C:\\msys64\\ucrt64\\bin\\g++.exe"'), 'C:\\msys64\\ucrt64\\bin\\g++.exe');
+  assert.equal(resolveTempRoot({
+    platform: 'win32',
+    systemTempRoot: 'C:\\Users\\홍 길동\\AppData\\Local\\Temp',
+    cwd: 'C:\\judge04',
+    env: {},
+  }), 'C:\\judge04\\.judge-tmp');
+  assert.equal(resolveTempRoot({
+    platform: 'win32',
+    systemTempRoot: 'C:\\Users\\홍 길동\\AppData\\Local\\Temp',
+    cwd: 'C:\\judge04',
+    env: { JUDGE_TEMP_ROOT: 'D:\\judge-tmp' },
+  }), 'D:\\judge-tmp');
 });
 
 test('judge contract tightens no-additional-time limits without changing accepted output', async (t) => {
@@ -157,6 +216,23 @@ test('judge contract returns CE with compile diagnostics for invalid C++', async
     result.compileLog || result.stderr || result.error || result.details,
     'expected compile diagnostics in compileLog/stderr/error/details'
   );
+});
+
+test('judge contract exposes compiler spawn errors as compile diagnostics', async () => {
+  const { judgeSubmission } = loadJudgeModule();
+  const result = await judgeSubmission({
+    problemId: 'contract-missing-compiler',
+    sourceCode: addTwoAccepted,
+    language: 'cpp',
+    timeLimit: '1 초',
+    memoryLimit: '128 MB',
+    testCases: [
+      { input: '1 2\n', output: '3\n' },
+    ],
+  }, { compiler: path.join(os.tmpdir(), 'definitely-missing-g++') });
+
+  assert.equal(verdictOf(result), 'CE', JSON.stringify(result, null, 2));
+  assert.match(result.compileLog, /spawn|ENOENT|missing/i);
 });
 
 test('judge contract returns TLE for non-terminating C++', { timeout: 5000 }, async (t) => {

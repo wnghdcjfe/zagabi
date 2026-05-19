@@ -32,6 +32,29 @@ const STATUS_BY_VERDICT = {
   internal_error: { id: 13, description: 'Internal Error' },
 };
 
+const CPP_LANGUAGE_STANDARDS = new Map([
+  ['c++', 'gnu++17'],
+  ['cpp', 'gnu++17'],
+  ['cxx', 'gnu++17'],
+  ['cplusplus', 'gnu++17'],
+  ['c++17', 'gnu++17'],
+  ['cpp17', 'gnu++17'],
+  ['cxx17', 'gnu++17'],
+  ['cplusplus17', 'gnu++17'],
+  ['gnuc++17', 'gnu++17'],
+  ['gnucpp17', 'gnu++17'],
+  ['gnu++17', 'gnu++17'],
+  ['c++20', 'gnu++20'],
+  ['cpp20', 'gnu++20'],
+  ['cxx20', 'gnu++20'],
+  ['cplusplus20', 'gnu++20'],
+  ['gnuc++20', 'gnu++20'],
+  ['gnucpp20', 'gnu++20'],
+  ['gnu++20', 'gnu++20'],
+  ['c++2a', 'gnu++20'],
+  ['gnu++2a', 'gnu++20'],
+]);
+
 class HttpError extends Error {
   constructor(statusCode, code, message, details) {
     super(message);
@@ -176,10 +199,10 @@ function resolveJudgeFunction(judgeModule) {
   return null;
 }
 
-function isCppLanguage(value) {
-  if (value === undefined || value === null || value === '') return true;
+function normalizeCppLanguage(value) {
+  if (value === undefined || value === null || value === '') return 'gnu++17';
   const language = String(value).trim().toLowerCase().replace(/\s+/g, '');
-  return ['c++', 'cpp', 'cxx', 'cplusplus', 'gnu++17', 'gnu++20'].includes(language);
+  return CPP_LANGUAGE_STANDARDS.get(language) || null;
 }
 
 function validateJudgeRequest(body) {
@@ -187,7 +210,8 @@ function validateJudgeRequest(body) {
     throw new HttpError(400, 'INVALID_PROBLEM_ID', 'problemId must be a positive integer');
   }
 
-  if (!isCppLanguage(body.language ?? body.lang)) {
+  const language = normalizeCppLanguage(body.language ?? body.lang);
+  if (!language) {
     throw new HttpError(400, 'UNSUPPORTED_LANGUAGE', 'only C++ submissions are supported');
   }
 
@@ -219,6 +243,7 @@ function validateJudgeRequest(body) {
   return {
     problemId: body.problemId,
     sourceCode,
+    language,
     testCases,
     timeLimit: body.timeLimit,
     memoryLimit: body.memoryLimit,
@@ -361,6 +386,7 @@ async function runJudge({ body, judgePath }) {
 
   const result = await judge({
     sourceCode: problem.sourceCode,
+    language: problem.language,
     problem,
   });
   return formatJudgeResponse(problem, result);
@@ -440,6 +466,7 @@ module.exports = {
   createApp,
   optionsResponse,
   readJsonBody,
+  normalizeCppLanguage,
   resolveJudgeFunction,
   resolveCorsOrigins,
   runJudge,
