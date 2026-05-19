@@ -7,6 +7,17 @@
 - npm
 - `g++` (C++ 컴파일러)
 
+### Windows C++ 컴파일러
+
+윈도우에서는 MinGW-w64/MSYS2의 `g++`를 권장합니다. `g++`가 PATH에 없다면 서버 실행 전에 컴파일러 경로를 지정할 수 있습니다.
+
+```powershell
+$env:JUDGE_CXX="C:\msys64\ucrt64\bin\g++.exe"
+$env:HOST="0.0.0.0"
+$env:PORT="12014"
+npm start
+```
+
 ## 실행법
 
 ### 1. 설치
@@ -145,4 +156,3 @@ curl -i -X OPTIONS http://127.0.0.1:12014/judge \
 | `CE` | Compile Error |
 | `RE` | Runtime Error |
 | `TLE` | Time Limit Exceeded |
- 

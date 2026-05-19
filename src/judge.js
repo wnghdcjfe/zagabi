@@ -1,5 +1,6 @@
 'use strict';
 
+const { constants: fsConstants } = require('node:fs');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
@@ -10,7 +11,19 @@ const DEFAULT_DATA_PATH = path.resolve(process.cwd(), 'data.json');
 const DEFAULT_COMPILE_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_NO_ADDITIONAL_TIME_RATIO = 0.75;
+const SOURCE_FILE_NAME = 'main.cpp';
+const POSIX_BINARY_FILE_NAME = 'main';
+const WINDOWS_BINARY_FILE_NAME = 'main.exe';
 const VERDICT_PRIORITY = ['TLE', 'MLE', 'RE', 'WA'];
+const WINDOWS_COMPILER_CANDIDATES = [
+  'g++',
+  'g++.exe',
+  'C:\\msys64\\ucrt64\\bin\\g++.exe',
+  'C:\\msys64\\mingw64\\bin\\g++.exe',
+  'C:\\msys64\\clang64\\bin\\g++.exe',
+  'C:\\MinGW\\bin\\g++.exe',
+  'C:\\ProgramData\\chocolatey\\bin\\g++.exe',
+];
 
 function parseTimeLimitMs(value, fallbackMs = 1_000) {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, value);
@@ -156,6 +169,103 @@ function resolveMemoryPolicy(options = {}) {
 
 function normalizeOutput(value) {
   return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/[\s\n]+$/g, '');
+}
+
+function binaryFileNameForPlatform(platform = process.platform) {
+  return platform === 'win32' ? WINDOWS_BINARY_FILE_NAME : POSIX_BINARY_FILE_NAME;
+}
+
+function executableCommandForFile(binaryFileName, platform = process.platform) {
+  const separator = platform === 'win32' ? '\\' : '/';
+  return `.${separator}${binaryFileName}`;
+}
+
+function buildDefaultCompileArgs(options = {}) {
+  const platform = options.platform || process.platform;
+  const sourceFileName = options.sourceFileName || SOURCE_FILE_NAME;
+  const binaryFileName = options.binaryFileName || binaryFileNameForPlatform(platform);
+  const args = ['-std=c++17', '-O2'];
+
+  if (platform !== 'win32') {
+    args.push('-pipe');
+  }
+
+  return [
+    ...args,
+    '-finput-charset=UTF-8',
+    '-fexec-charset=UTF-8',
+    sourceFileName,
+    '-o',
+    binaryFileName,
+  ];
+}
+
+function hasPathSeparator(command) {
+  return command.includes('/') || command.includes('\\');
+}
+
+function windowsPathExts(env = process.env) {
+  const raw = env.PATHEXT || '.EXE;.CMD;.BAT;.COM';
+  const exts = raw.split(';').map((ext) => ext.trim()).filter(Boolean);
+  return ['', ...exts, ...exts.map((ext) => ext.toLowerCase())];
+}
+
+async function canAccessFile(filePath) {
+  try {
+    await fs.access(filePath, fsConstants.X_OK);
+    return true;
+  } catch {
+    try {
+      await fs.access(filePath, fsConstants.F_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function findExecutableOnPath(command, options = {}) {
+  const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path;
+
+  if (!command || hasPathSeparator(command) || pathApi.isAbsolute(command)) {
+    return await canAccessFile(command) ? command : null;
+  }
+
+  const pathValue = env.PATH || env.Path || env.path || '';
+  const pathDelimiter = platform === 'win32' ? ';' : path.delimiter;
+  const pathDirs = pathValue.split(pathDelimiter).filter(Boolean);
+  const extensions = platform === 'win32' ? windowsPathExts(env) : [''];
+  const commandLower = command.toLowerCase();
+  const alreadyHasWindowsExt = platform === 'win32'
+    && windowsPathExts(env).some((ext) => ext && commandLower.endsWith(ext.toLowerCase()));
+
+  for (const dir of pathDirs) {
+    for (const ext of extensions) {
+      if (alreadyHasWindowsExt && ext) continue;
+      const candidate = pathApi.join(dir, `${command}${ext}`);
+      if (await canAccessFile(candidate)) return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function resolveCompiler(options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  const explicitCompiler = options.compiler || env.JUDGE_CXX || env.CXX;
+  if (explicitCompiler) return String(explicitCompiler).trim();
+
+  if (platform !== 'win32') return 'g++';
+
+  for (const candidate of WINDOWS_COMPILER_CANDIDATES) {
+    const resolved = await findExecutableOnPath(candidate, { env, platform });
+    if (resolved) return resolved;
+  }
+
+  return 'g++';
 }
 
 function validateProblem(problem) {
@@ -322,18 +432,21 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
   const maxOutputBytes = judgeOptions.maxOutputBytes || DEFAULT_MAX_OUTPUT_BYTES;
   const tempRoot = judgeOptions.tempRoot || os.tmpdir();
   const workDir = await fs.mkdtemp(path.join(tempRoot, 'judge-cpp-'));
-  const sourcePath = path.join(workDir, 'main.cpp');
-  const binaryPath = path.join(workDir, process.platform === 'win32' ? 'main.exe' : 'main');
-  const compiler = judgeOptions.compiler || 'g++';
-  const compileArgs = judgeOptions.compileArgs || [
-    '-std=c++17',
-    '-O2',
-    '-pipe',
-    sourcePath,
-    '-o',
-    binaryPath,
-  ];
+  const runtimePlatform = process.platform;
+  const binaryFileName = binaryFileNameForPlatform(runtimePlatform);
+  const sourcePath = path.join(workDir, SOURCE_FILE_NAME);
+  const compiler = await resolveCompiler({
+    compiler: judgeOptions.compiler,
+    env: judgeOptions.env,
+    platform: runtimePlatform,
+  });
+  const compileArgs = judgeOptions.compileArgs || buildDefaultCompileArgs({
+    platform: runtimePlatform,
+    sourceFileName: SOURCE_FILE_NAME,
+    binaryFileName,
+  });
   const compileCommand = [compiler, ...compileArgs].join(' ');
+  const binaryCommand = executableCommandForFile(binaryFileName, runtimePlatform);
 
   let compile;
   let cases = [];
@@ -346,6 +459,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     compile = buildCompileSummary(
       await runProcess(compiler, compileArgs, {
         cwd: workDir,
+        env: judgeOptions.env,
         timeoutMs: judgeOptions.compileTimeoutMs || DEFAULT_COMPILE_TIMEOUT_MS,
         maxOutputBytes,
       }),
@@ -363,8 +477,9 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
         const caseTimeoutMs = remainingAggregateMs === null
           ? effectiveTimeLimitMs
           : Math.max(1, Math.min(effectiveTimeLimitMs, remainingAggregateMs));
-        const run = await runProcess(binaryPath, [], {
+        const run = await runProcess(binaryCommand, [], {
           cwd: workDir,
+          env: judgeOptions.env,
           input: String(testCase.input ?? ''),
           timeoutMs: caseTimeoutMs,
           maxOutputBytes,
@@ -422,4 +537,9 @@ module.exports = {
   resolveMemoryPolicy,
   normalizeOutput,
   resolveSubmissionInput,
+  binaryFileNameForPlatform,
+  buildDefaultCompileArgs,
+  executableCommandForFile,
+  findExecutableOnPath,
+  resolveCompiler,
 };

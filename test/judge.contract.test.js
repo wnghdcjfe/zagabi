@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const { test } = require('node:test');
 
 function loadJudge() {
@@ -80,6 +83,49 @@ test('judge contract returns AC for matching C++ output', async (t) => {
 
   assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
   assert.ok(Array.isArray(result.cases || result.testCases || result.results), 'expected per-case debug details array');
+});
+
+test('judge contract compiles from temp paths with spaces and non-ASCII characters', async (t) => {
+  const { judgeSubmission } = loadJudgeModule();
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'judge 한글 path-'));
+  t.after(() => fs.rm(tempRoot, { recursive: true, force: true }));
+
+  const result = await judgeSubmission({
+    problemId: 'contract-temp-path',
+    sourceCode: addTwoAccepted,
+    language: 'cpp',
+    timeLimit: '1 초',
+    memoryLimit: '128 MB',
+    testCases: [
+      { input: '7 8\n', output: '15\n' },
+    ],
+  }, { tempRoot });
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  assert.match(result.compile.command, /main\.cpp/);
+  assert.doesNotMatch(result.compile.command, new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('default compile args avoid Windows-only path and pipe pitfalls', () => {
+  const {
+    binaryFileNameForPlatform,
+    buildDefaultCompileArgs,
+    executableCommandForFile,
+  } = loadJudgeModule();
+
+  const winArgs = buildDefaultCompileArgs({ platform: 'win32' });
+  assert.equal(binaryFileNameForPlatform('win32'), 'main.exe');
+  assert.equal(winArgs.includes('-pipe'), false);
+  assert.ok(winArgs.includes('-finput-charset=UTF-8'));
+  assert.ok(winArgs.includes('-fexec-charset=UTF-8'));
+  assert.deepEqual(winArgs.slice(-3), ['main.cpp', '-o', 'main.exe']);
+
+  const posixArgs = buildDefaultCompileArgs({ platform: 'linux' });
+  assert.equal(binaryFileNameForPlatform('linux'), 'main');
+  assert.equal(posixArgs.includes('-pipe'), true);
+  assert.deepEqual(posixArgs.slice(-3), ['main.cpp', '-o', 'main']);
+  assert.equal(executableCommandForFile('main', 'linux'), './main');
+  assert.equal(executableCommandForFile('main.exe', 'win32'), '.\\main.exe');
 });
 
 test('judge contract tightens no-additional-time limits without changing accepted output', async (t) => {
