@@ -64,6 +64,8 @@ curl -sS -X POST http://127.0.0.1:12014/judge \
 JSON
 ```
 
+코딩살구 웹 클라이언트 호환을 위해 같은 배열을 `samples` 필드로 보내도 채점합니다.
+
 ### 4. `data.json`으로 테스트 → `ret.json` 저장
 
 ```bash

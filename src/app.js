@@ -205,6 +205,26 @@ function normalizeCppLanguage(value) {
   return CPP_LANGUAGE_STANDARDS.get(language) || null;
 }
 
+function resolveTestCases(body) {
+  if (body.testCases !== undefined) {
+    if (Array.isArray(body.testCases) && body.testCases.length > 0) {
+      return { fieldName: 'testCases', value: body.testCases };
+    }
+    if (body.samples === undefined) {
+      throw new HttpError(400, 'INVALID_TEST_CASES', 'testCases must be a non-empty array');
+    }
+  }
+
+  if (body.samples !== undefined) {
+    if (Array.isArray(body.samples) && body.samples.length > 0) {
+      return { fieldName: 'samples', value: body.samples };
+    }
+    throw new HttpError(400, 'INVALID_TEST_CASES', 'testCases must be a non-empty array');
+  }
+
+  throw new HttpError(400, 'INVALID_TEST_CASES', 'testCases must be a non-empty array');
+}
+
 function validateJudgeRequest(body) {
   if (!Number.isInteger(body.problemId) || body.problemId <= 0) {
     throw new HttpError(400, 'INVALID_PROBLEM_ID', 'problemId must be a positive integer');
@@ -220,19 +240,18 @@ function validateJudgeRequest(body) {
     throw new HttpError(400, 'INVALID_SOURCE_CODE', 'sourceCode must be a non-empty string');
   }
 
-  if (!Array.isArray(body.testCases) || body.testCases.length === 0) {
-    throw new HttpError(400, 'INVALID_TEST_CASES', 'testCases must be a non-empty array');
-  }
+  const rawTestCases = resolveTestCases(body);
 
-  const testCases = body.testCases.map((testCase, index) => {
+  const testCases = rawTestCases.value.map((testCase, index) => {
+    const fieldName = `${rawTestCases.fieldName}[${index}]`;
     if (!testCase || typeof testCase !== 'object' || Array.isArray(testCase)) {
-      throw new HttpError(400, 'INVALID_TEST_CASE', `testCases[${index}] must be an object`);
+      throw new HttpError(400, 'INVALID_TEST_CASE', `${fieldName} must be an object`);
     }
     if (typeof testCase.input !== 'string') {
-      throw new HttpError(400, 'INVALID_TEST_CASE_INPUT', `testCases[${index}].input must be a string`);
+      throw new HttpError(400, 'INVALID_TEST_CASE_INPUT', `${fieldName}.input must be a string`);
     }
     if (typeof testCase.output !== 'string' || testCase.output.length === 0) {
-      throw new HttpError(400, 'INVALID_TEST_CASE_OUTPUT', `testCases[${index}].output must be a non-empty string`);
+      throw new HttpError(400, 'INVALID_TEST_CASE_OUTPUT', `${fieldName}.output must be a non-empty string`);
     }
     return {
       input: testCase.input,

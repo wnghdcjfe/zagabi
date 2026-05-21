@@ -185,6 +185,26 @@ test('accepted submission returns ret.md judge shape', async () => {
   assert.equal(response.body.results[0].status.description, 'Accepted');
 });
 
+test('Coding Salgu samples payload is accepted as judge test cases', async () => {
+  const { testCases, ...payload } = judgePayload();
+  const response = await request('POST', '/judge', {
+    body: {
+      ...payload,
+      samples: testCases,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.verdict, 'accepted');
+  assert.deepEqual(response.body.summary, {
+    total: 2,
+    passed: 2,
+    failed: 0,
+    firstFailedIndex: null,
+  });
+});
+
 test('wrong answer returns HTTP 200 with ok false and first failed index', async () => {
   const response = await request('POST', '/judge', {
     body: judgePayload({ sourceCode: wrongSource }),
@@ -233,6 +253,13 @@ test('validateJudgeRequest normalizes C++20 language for judge module', () => {
   const { validateJudgeRequest } = require('../src/app');
   const problem = validateJudgeRequest(judgePayload({ language: 'GNU C++20' }));
   assert.equal(problem.language, 'gnu++20');
+});
+
+test('validateJudgeRequest accepts Coding Salgu samples alias', () => {
+  const { validateJudgeRequest } = require('../src/app');
+  const { testCases, ...payload } = judgePayload();
+  const problem = validateJudgeRequest({ ...payload, samples: testCases });
+  assert.deepEqual(problem.testCases, testCases);
 });
 
 test('runJudge forwards normalized language to judge module', async (t) => {
