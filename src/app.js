@@ -442,6 +442,23 @@ function createApp(options = {}) {
         return;
       }
 
+      if (url.pathname === '/') {
+        if (req.method !== 'GET') {
+          methodNotAllowed(res, ['GET']);
+          return;
+        }
+
+        jsonResponse(res, 200, {
+          ok: true,
+          service: 'judge_server',
+          endpoints: {
+            health: '/health',
+            judge: '/judge',
+          },
+        });
+        return;
+      }
+
       if (url.pathname === '/health') {
         if (req.method !== 'GET') {
           methodNotAllowed(res, ['GET']);

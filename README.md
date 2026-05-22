@@ -42,6 +42,9 @@ HOST=0.0.0.0 PORT=12014 npm start
 - 헬스체크: `GET /health`
 
 ```bash
+curl http://127.0.0.1:12014/
+# {"ok":true,"service":"judge_server","endpoints":{"health":"/health","judge":"/judge"}}
+
 curl http://127.0.0.1:12014/health
 # {"ok":true,"service":"judge_server"}
 ```

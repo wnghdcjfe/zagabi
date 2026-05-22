@@ -108,6 +108,19 @@ test('GET /health matches ret.md health body', async () => {
   assert.deepEqual(response.body, { ok: true, service: 'judge_server' });
 });
 
+test('GET / returns browser-friendly judge server status', async () => {
+  const response = await request('GET', '/');
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, {
+    ok: true,
+    service: 'judge_server',
+    endpoints: {
+      health: '/health',
+      judge: '/judge',
+    },
+  });
+});
+
 test('default JSON request body limit is 10MB', () => {
   assert.equal(DEFAULT_BODY_LIMIT_BYTES, 10 * 1024 * 1024);
 });
