@@ -20,3 +20,7 @@ tmp/
 
 # Local OMX runtime metadata
 .omx/*.json
+
+# Local OMC / Claude Code runtime metadata (session/orchestration state)
+.omc/
+.claude/
