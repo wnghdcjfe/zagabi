@@ -118,9 +118,24 @@ test('default compile args avoid Windows-only path and pipe pitfalls', () => {
   assert.equal(binaryFileNameForPlatform('win32'), 'main.exe');
   assert.equal(winArgs[0], '-std=gnu++17');
   assert.equal(winArgs.includes('-pipe'), false);
+  // Windows binaries are statically linked so they do not depend on toolchain
+  // runtime DLLs (libstdc++/libc++, libgcc/libunwind, libwinpthread) at run time.
+  assert.equal(winArgs.includes('-static'), true);
   assert.ok(winArgs.includes('-finput-charset=UTF-8'));
   assert.ok(winArgs.includes('-fexec-charset=UTF-8'));
   assert.deepEqual(winArgs.slice(-3), ['main.cpp', '-o', 'main.exe']);
+
+  // The bundled <bits/stdc++.h> shim must be on the include path (via -idirafter,
+  // a fallback so toolchains shipping the real header keep using it) so that
+  // submissions including it compile on Windows toolchains that lack the header.
+  const idirafterIndex = winArgs.indexOf('-idirafter');
+  assert.ok(idirafterIndex !== -1, 'default args must expose the bits/stdc++.h shim');
+  assert.match(winArgs[idirafterIndex + 1], /runtime-include$/);
+  assert.equal(
+    buildDefaultCompileArgs({ platform: 'win32', bitsCompatIncludeDir: null }).includes('-idirafter'),
+    false,
+    'bitsCompatIncludeDir: null must omit the shim include path',
+  );
   assert.equal(cppStandardForLanguage('gnu++20'), 'gnu++20');
   assert.equal(buildDefaultCompileArgs({ platform: 'win32', language: 'gnu++20' })[0], '-std=gnu++20');
 
@@ -128,6 +143,8 @@ test('default compile args avoid Windows-only path and pipe pitfalls', () => {
   assert.equal(binaryFileNameForPlatform('linux'), 'main');
   assert.equal(posixArgs[0], '-std=gnu++17');
   assert.equal(posixArgs.includes('-pipe'), true);
+  // POSIX/BOJ judging keeps dynamic linking (macOS does not support -static).
+  assert.equal(posixArgs.includes('-static'), false);
   assert.deepEqual(posixArgs.slice(-3), ['main.cpp', '-o', 'main']);
   assert.equal(executableCommandForFile('main', 'linux'), './main');
   assert.equal(executableCommandForFile('main.exe', 'win32'), '.\\main.exe');

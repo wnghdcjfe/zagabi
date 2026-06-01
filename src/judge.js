@@ -16,6 +16,10 @@ const DEFAULT_NO_ADDITIONAL_TIME_RATIO = 0.75;
 const SOURCE_FILE_NAME = 'main.cpp';
 const POSIX_BINARY_FILE_NAME = 'main';
 const WINDOWS_BINARY_FILE_NAME = 'main.exe';
+// Bundled portable <bits/stdc++.h> shim. Added to the compiler include path so
+// submissions that include it still compile on toolchains that don't ship the
+// header (MSYS2 clang64 g++, MSVC). See runtime-include/bits/stdc++.h.
+const BITS_COMPAT_INCLUDE_DIR = path.join(__dirname, 'runtime-include');
 const VERDICT_PRIORITY = ['TLE', 'MLE', 'RE', 'WA'];
 const WINDOWS_COMPILER_CANDIDATES = [
   'g++',
@@ -269,6 +273,16 @@ function normalizeOutput(value) {
   return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/[\s\n]+$/g, '');
 }
 
+// Convert captured child output to LF line endings without trimming. On Windows
+// the MinGW C runtime opens stdout in text mode and rewrites '\n' to '\r\n', so
+// the bytes on the pipe carry CRLF even though the program printed LF. We report
+// the program's logical output, so strip the carriage returns while preserving
+// content and trailing newlines. (Verdict comparison runs on raw output via
+// compareOutputs, so this only affects the reported actual/stderr fields.)
+function normalizeReportedOutput(value) {
+  return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function binaryFileNameForPlatform(platform = process.platform) {
   return platform === 'win32' ? WINDOWS_BINARY_FILE_NAME : POSIX_BINARY_FILE_NAME;
 }
@@ -283,10 +297,27 @@ function buildDefaultCompileArgs(options = {}) {
   const sourceFileName = options.sourceFileName || SOURCE_FILE_NAME;
   const binaryFileName = options.binaryFileName || binaryFileNameForPlatform(platform);
   const standard = cppStandardForLanguage(options.language || options.standard);
+  const bitsCompatIncludeDir = options.bitsCompatIncludeDir === undefined
+    ? BITS_COMPAT_INCLUDE_DIR
+    : options.bitsCompatIncludeDir;
   const args = [`-std=${standard}`, '-O2'];
 
   if (platform !== 'win32') {
     args.push('-pipe');
+  } else {
+    // Statically link the C/C++ runtime on Windows. MinGW/LLVM-MinGW binaries
+    // otherwise depend on toolchain DLLs (libstdc++/libc++, libgcc/libunwind,
+    // libwinpthread) that are not on the judge's runtime PATH, which surfaces as
+    // a spurious RE. Static linking makes the produced .exe self-contained.
+    // (POSIX/BOJ judging keeps dynamic linking; macOS does not support -static.)
+    args.push('-static');
+  }
+
+  // Expose the bundled <bits/stdc++.h> shim as a fallback include path. -idirafter
+  // searches it AFTER the toolchain's own headers, so g++ that ships the real header
+  // keeps using it, while libc++/MSVC toolchains that lack it resolve to our shim.
+  if (bitsCompatIncludeDir) {
+    args.push('-idirafter', bitsCompatIncludeDir);
   }
 
   return [
@@ -449,8 +480,8 @@ function buildCaseResult(testCase, index, run, policy = {}) {
     status,
     input: String(testCase.input ?? ''),
     expected: String(testCase.output ?? ''),
-    actual: run.stdout,
-    stderr: run.stderr,
+    actual: normalizeReportedOutput(run.stdout),
+    stderr: normalizeReportedOutput(run.stderr),
     exitCode: run.exitCode,
     signal: run.signal,
     timedOut: run.timedOut || Boolean(policy.aggregateTimedOut),
