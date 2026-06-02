@@ -2,7 +2,7 @@
 
 const { createApp } = require('./app');
 
-const host = process.env.HOST || '127.0.0.1';
+const host = process.env.HOST || '0.0.0.0';
 const port = Number.parseInt(process.env.PORT || '12014', 10);
 
 if (!Number.isInteger(port) || port <= 0 || port > 65535) {
