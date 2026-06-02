@@ -13,6 +13,20 @@ const DEFAULT_WINDOWS_COMPILE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_CPP_STANDARD = 'gnu++17';
 const DEFAULT_NO_ADDITIONAL_TIME_RATIO = 0.75;
+// Adaptive compile timeout. Low-spec machines (e.g. an Intel 1.4GHz i5 with 8GB
+// RAM that thermally throttles and swaps) can take far longer than the fixed
+// platform default to compile the same source, tripping a spurious "compiler
+// timed out" CE. At startup we compile a tiny reference program with the real
+// judge flags, measure how long THIS machine takes, and scale the compile budget
+// to probeMs * multiplier — clamped so we never drop below the platform default
+// and never balloon past a hard ceiling. This reflects throttling, swap, slow
+// toolchains, and AV scanning that a static spec heuristic cannot see.
+const DEFAULT_COMPILE_TIMEOUT_MULTIPLIER = 4;
+const DEFAULT_COMPILE_TIMEOUT_CEILING_MS = 60_000;
+// Hard wall for the calibration probe itself so a pathological toolchain cannot
+// hang startup forever; on timeout we fall back to the platform default.
+const CALIBRATION_PROBE_MAX_MS = 90_000;
+const CALIBRATION_REFERENCE_SOURCE = '#include <bits/stdc++.h>\nint main(){ return 0; }\n';
 const SOURCE_FILE_NAME = 'main.cpp';
 const POSIX_BINARY_FILE_NAME = 'main';
 const WINDOWS_BINARY_FILE_NAME = 'main.exe';
@@ -101,6 +115,143 @@ function defaultCompileTimeoutMsForPlatform(platform = process.platform, env = p
   const configured = parsePositiveInteger(env && env.JUDGE_COMPILE_TIMEOUT_MS);
   if (configured !== null) return configured;
   return platform === 'win32' ? DEFAULT_WINDOWS_COMPILE_TIMEOUT_MS : DEFAULT_COMPILE_TIMEOUT_MS;
+}
+
+function platformBaseCompileTimeoutMs(platform = process.platform) {
+  return platform === 'win32' ? DEFAULT_WINDOWS_COMPILE_TIMEOUT_MS : DEFAULT_COMPILE_TIMEOUT_MS;
+}
+
+function isCompileCalibrationEnabled(env = process.env) {
+  const raw = String((env && env.JUDGE_COMPILE_CALIBRATION) ?? '').trim().toLowerCase();
+  return !['off', 'false', '0', 'no', 'disabled'].includes(raw);
+}
+
+function compileTimeoutMultiplier(env = process.env) {
+  const parsed = Number(env && env.JUDGE_COMPILE_TIMEOUT_MULTIPLIER);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : DEFAULT_COMPILE_TIMEOUT_MULTIPLIER;
+}
+
+function compileTimeoutCeilingMs(env = process.env) {
+  const parsed = parsePositiveInteger(env && env.JUDGE_COMPILE_TIMEOUT_MAX);
+  return parsed !== null ? parsed : DEFAULT_COMPILE_TIMEOUT_CEILING_MS;
+}
+
+// Pure: turn a measured calibration probe time into a compile budget. The budget
+// scales linearly with how slow this machine is, but is floored at the platform
+// default (so fast machines keep the original 10s/30s budget) and capped at the
+// ceiling (so a degenerate probe cannot grant an unbounded budget).
+function computeCalibratedCompileTimeoutMs(probeMs, options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  const floorMs = platformBaseCompileTimeoutMs(platform);
+  const ceilingMs = Math.max(floorMs, compileTimeoutCeilingMs(env));
+  if (!Number.isFinite(probeMs) || probeMs <= 0) return floorMs;
+  const scaled = Math.round(probeMs * compileTimeoutMultiplier(env));
+  return Math.min(ceilingMs, Math.max(floorMs, scaled));
+}
+
+const compileCalibrationCache = new Map();
+
+// Compile a tiny reference program once per (platform, compiler, args) and cache
+// the derived compile budget. Memoized so the probe cost is paid at most once per
+// process. Any failure (probe error/timeout) degrades gracefully to the platform
+// default budget.
+function calibrateCompileEnvironment(options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+  const sourceFileName = options.sourceFileName || SOURCE_FILE_NAME;
+  const binaryFileName = options.binaryFileName || binaryFileNameForPlatform(platform);
+
+  const run = (async () => {
+    const compiler = options.compiler || await resolveCompiler({ env, platform });
+    const compileArgs = options.compileArgs || buildDefaultCompileArgs({
+      platform,
+      sourceFileName,
+      binaryFileName,
+    });
+    const cacheKey = `${platform}::${compiler}::${compileArgs.join(' ')}`;
+    if (compileCalibrationCache.has(cacheKey)) return compileCalibrationCache.get(cacheKey);
+
+    const promise = (async () => {
+      const floorMs = platformBaseCompileTimeoutMs(platform);
+      const tempRoot = resolveTempRoot({ env, platform, cwd: options.cwd });
+      let workDir = null;
+      try {
+        await fs.mkdir(tempRoot, { recursive: true });
+        workDir = await fs.mkdtemp(path.join(tempRoot, 'judge-cal-'));
+        await fs.writeFile(path.join(workDir, sourceFileName), CALIBRATION_REFERENCE_SOURCE, 'utf8');
+        const result = await runProcess(compiler, compileArgs, {
+          cwd: workDir,
+          env: options.spawnEnv,
+          timeoutMs: CALIBRATION_PROBE_MAX_MS,
+          maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
+        });
+        const probeMs = Number.isFinite(result.durationMs) ? result.durationMs : null;
+        const ok = result.exitCode === 0 && !result.timedOut && !result.error && probeMs !== null;
+        const compileTimeoutMs = ok
+          ? computeCalibratedCompileTimeoutMs(probeMs, { platform, env })
+          : floorMs;
+        return {
+          ok,
+          compiler,
+          probeMs,
+          compileTimeoutMs,
+          floorMs,
+          multiplier: compileTimeoutMultiplier(env),
+          ceilingMs: Math.max(floorMs, compileTimeoutCeilingMs(env)),
+          timedOut: Boolean(result.timedOut),
+          error: result.error,
+        };
+      } catch (error) {
+        return { ok: false, compiler, probeMs: null, compileTimeoutMs: floorMs, floorMs, error: error.message };
+      } finally {
+        if (workDir) await fs.rm(workDir, { recursive: true, force: true });
+      }
+    })();
+
+    compileCalibrationCache.set(cacheKey, promise);
+    return promise;
+  })();
+
+  return run;
+}
+
+// Resolve the compile budget for a submission. Order of precedence:
+//   1. explicit per-request compileTimeoutMs
+//   2. JUDGE_COMPILE_TIMEOUT_MS env (hard operator override)
+//   3. adaptive calibration (unless disabled via JUDGE_COMPILE_CALIBRATION=off)
+//   4. platform default
+async function resolveCompileTimeoutMs(options = {}) {
+  const platform = options.platform || process.platform;
+  const env = options.env || process.env;
+
+  const requested = parsePositiveInteger(options.explicitTimeoutMs);
+  if (requested !== null) return requested;
+
+  const envOverride = parsePositiveInteger(env && env.JUDGE_COMPILE_TIMEOUT_MS);
+  if (envOverride !== null) return envOverride;
+
+  if (isCompileCalibrationEnabled(env)) {
+    try {
+      const calibration = await calibrateCompileEnvironment(options);
+      if (calibration && Number.isFinite(calibration.compileTimeoutMs)) {
+        return calibration.compileTimeoutMs;
+      }
+    } catch {
+      // Fall through to the platform default on any calibration failure.
+    }
+  }
+
+  return platformBaseCompileTimeoutMs(platform);
+}
+
+// Convenience entry point for server startup: warm the calibration cache (and let
+// callers log the result) unless an explicit env override makes it pointless.
+async function warmupCompileCalibration(options = {}) {
+  const env = options.env || process.env;
+  if (parsePositiveInteger(env && env.JUDGE_COMPILE_TIMEOUT_MS) !== null) return null;
+  if (!isCompileCalibrationEnabled(env)) return null;
+  return calibrateCompileEnvironment(options);
 }
 
 function normalizeCppLanguage(value) {
@@ -604,6 +755,18 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
   const compileCommand = [compiler, ...compileArgs].join(' ');
   const binaryCommand = executableCommandForFile(binaryFileName, runtimePlatform);
 
+  const compileTimeoutMs = await resolveCompileTimeoutMs({
+    platform: runtimePlatform,
+    env: runnerEnv,
+    spawnEnv: judgeOptions.env,
+    compiler,
+    compileArgs,
+    sourceFileName: SOURCE_FILE_NAME,
+    binaryFileName,
+    cwd: judgeOptions.cwd,
+    explicitTimeoutMs: judgeOptions.compileTimeoutMs,
+  });
+
   let compile;
   let cases = [];
   let verdict = 'AC';
@@ -616,8 +779,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
       await runProcess(compiler, compileArgs, {
         cwd: workDir,
         env: judgeOptions.env,
-        timeoutMs: judgeOptions.compileTimeoutMs
-          || defaultCompileTimeoutMsForPlatform(runtimePlatform, runnerEnv),
+        timeoutMs: compileTimeoutMs,
         maxOutputBytes,
       }),
       compileCommand,
@@ -672,6 +834,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
       passed: cases.filter((testCase) => testCase.status === 'AC').length,
       total: problem.testCases.length,
       timeLimitMs,
+      compileTimeoutMs,
       effectiveTimeLimitMs,
       strictTimeLimitRatio: strictRatio,
       aggregateTimeLimitMs,
@@ -704,4 +867,10 @@ module.exports = {
   resolveCompiler,
   stripWrappingQuotes,
   cppStandardForLanguage,
+  platformBaseCompileTimeoutMs,
+  isCompileCalibrationEnabled,
+  computeCalibratedCompileTimeoutMs,
+  calibrateCompileEnvironment,
+  resolveCompileTimeoutMs,
+  warmupCompileCalibration,
 };

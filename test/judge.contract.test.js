@@ -262,6 +262,83 @@ test('judge contract returns TLE for non-terminating C++', { timeout: 5000 }, as
   assert.equal(verdictOf(result), 'TLE', JSON.stringify(result, null, 2));
 });
 
+test('calibrated compile timeout scales with probe time but stays clamped', () => {
+  const { computeCalibratedCompileTimeoutMs } = loadJudgeModule();
+
+  // Fast machine: a ~2s probe stays at the platform floor (10s/30s), unchanged.
+  assert.equal(computeCalibratedCompileTimeoutMs(2000, { platform: 'linux', env: {} }), 10_000);
+  assert.equal(computeCalibratedCompileTimeoutMs(2000, { platform: 'win32', env: {} }), 30_000);
+
+  // Slow machine: a 7s probe * default 4x => 28s budget (the i5-8257U case).
+  assert.equal(computeCalibratedCompileTimeoutMs(7000, { platform: 'linux', env: {} }), 28_000);
+
+  // Degenerate probe never grants an unbounded budget (capped at the ceiling).
+  assert.equal(computeCalibratedCompileTimeoutMs(40_000, { platform: 'linux', env: {} }), 60_000);
+
+  // Multiplier and ceiling are configurable via env.
+  assert.equal(
+    computeCalibratedCompileTimeoutMs(7000, { platform: 'linux', env: { JUDGE_COMPILE_TIMEOUT_MULTIPLIER: '2' } }),
+    14_000,
+  );
+  assert.equal(
+    computeCalibratedCompileTimeoutMs(40_000, { platform: 'linux', env: { JUDGE_COMPILE_TIMEOUT_MAX: '120000' } }),
+    120_000,
+  );
+
+  // Non-positive / non-finite probe degrades to the platform floor.
+  assert.equal(computeCalibratedCompileTimeoutMs(0, { platform: 'linux', env: {} }), 10_000);
+  assert.equal(computeCalibratedCompileTimeoutMs(NaN, { platform: 'linux', env: {} }), 10_000);
+});
+
+test('compile timeout precedence: request > env override > calibration > default', async () => {
+  const { resolveCompileTimeoutMs } = loadJudgeModule();
+
+  // Explicit per-request value wins outright (no calibration triggered).
+  assert.equal(await resolveCompileTimeoutMs({ platform: 'linux', env: {}, explicitTimeoutMs: 12_345 }), 12_345);
+
+  // JUDGE_COMPILE_TIMEOUT_MS hard override wins over calibration.
+  assert.equal(
+    await resolveCompileTimeoutMs({ platform: 'linux', env: { JUDGE_COMPILE_TIMEOUT_MS: '45000' } }),
+    45_000,
+  );
+
+  // Calibration disabled => platform default, no probe compile performed.
+  assert.equal(
+    await resolveCompileTimeoutMs({ platform: 'linux', env: { JUDGE_COMPILE_CALIBRATION: 'off' } }),
+    10_000,
+  );
+  assert.equal(
+    await resolveCompileTimeoutMs({ platform: 'win32', env: { JUDGE_COMPILE_CALIBRATION: 'off' } }),
+    30_000,
+  );
+});
+
+test('calibration enabled flag honors explicit off switches', () => {
+  const { isCompileCalibrationEnabled } = loadJudgeModule();
+  assert.equal(isCompileCalibrationEnabled({}), true);
+  assert.equal(isCompileCalibrationEnabled({ JUDGE_COMPILE_CALIBRATION: 'on' }), true);
+  for (const off of ['off', 'false', '0', 'no', 'disabled']) {
+    assert.equal(isCompileCalibrationEnabled({ JUDGE_COMPILE_CALIBRATION: off }), false);
+  }
+});
+
+test('calibration probe measures this machine and never lowers the platform budget', { timeout: 120_000 }, async (t) => {
+  const { calibrateCompileEnvironment, platformBaseCompileTimeoutMs } = loadJudgeModule();
+  const calibration = await calibrateCompileEnvironment();
+
+  if (!calibration.ok) {
+    t.skip(`compile calibration probe unavailable: ${calibration.error || 'unknown'}`);
+    return;
+  }
+
+  assert.ok(Number.isFinite(calibration.probeMs) && calibration.probeMs > 0, JSON.stringify(calibration));
+  assert.ok(
+    calibration.compileTimeoutMs >= platformBaseCompileTimeoutMs(process.platform),
+    `calibrated budget must not drop below the platform default: ${JSON.stringify(calibration)}`,
+  );
+  assert.ok(calibration.compileTimeoutMs <= calibration.ceilingMs, JSON.stringify(calibration));
+});
+
 test('judge memory policy enforces MLE only on Linux by default', () => {
   const { resolveMemoryPolicy } = loadJudgeModule();
 
