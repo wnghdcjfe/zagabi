@@ -27,6 +27,31 @@ const DEFAULT_COMPILE_TIMEOUT_CEILING_MS = 60_000;
 // hang startup forever; on timeout we fall back to the platform default.
 const CALIBRATION_PROBE_MAX_MS = 90_000;
 const CALIBRATION_REFERENCE_SOURCE = '#include <bits/stdc++.h>\nint main(){ return 0; }\n';
+// Adaptive run-time limit. A fixed problem time limit (e.g. 1s) assumes the
+// judge's reference hardware. On a much slower host the SAME correct solution
+// runs slower and trips a spurious TLE. We measure this host's CPU throughput
+// with a tight integer benchmark (run as a child process so it never blocks the
+// event loop) and stretch the per-case time limit by benchMs / referenceMs —
+// clamped so we never SHRINK a limit (min 1x) and never balloon past the max.
+// Compile-probe time is a poor runtime proxy (it is dominated by header I/O, AV
+// scanning, and swap), so runtime gets its own CPU-only probe.
+const CPU_BENCH_ITERATIONS = 50_000_000;
+const DEFAULT_REFERENCE_CPU_BENCH_MS = 300; // fast modern single core (this dev machine ~305ms)
+const DEFAULT_TIME_LIMIT_MULTIPLIER_MAX = 10;
+const CPU_BENCH_PROBE_MAX_MS = 60_000;
+// Runs in a child `node -e`; prints the best-of-3 wall time (ms) of the workload.
+const CPU_BENCH_SCRIPT = [
+  'function once(){',
+  '  const t=process.hrtime.bigint();',
+  '  let acc=0;',
+  `  for(let i=0;i<${CPU_BENCH_ITERATIONS};i++){acc=(acc+i*2654435761)>>>0;}`,
+  '  return Number((process.hrtime.bigint()-t)/1000000n)+(acc&0);',
+  '}',
+  'once();',
+  'let best=Infinity;',
+  'for(let k=0;k<3;k++){const m=once();if(m<best)best=m;}',
+  'process.stdout.write(String(best));',
+].join('');
 const SOURCE_FILE_NAME = 'main.cpp';
 const POSIX_BINARY_FILE_NAME = 'main';
 const WINDOWS_BINARY_FILE_NAME = 'main.exe';
@@ -254,6 +279,96 @@ async function warmupCompileCalibration(options = {}) {
   return calibrateCompileEnvironment(options);
 }
 
+function isRuntimeCalibrationEnabled(env = process.env) {
+  const raw = String((env && env.JUDGE_RUNTIME_CALIBRATION) ?? '').trim().toLowerCase();
+  return !['off', 'false', '0', 'no', 'disabled'].includes(raw);
+}
+
+function referenceCpuBenchMs(env = process.env) {
+  const parsed = Number(env && env.JUDGE_REFERENCE_CPU_BENCH_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REFERENCE_CPU_BENCH_MS;
+}
+
+function timeLimitMultiplierMax(env = process.env) {
+  const parsed = Number(env && env.JUDGE_TIME_LIMIT_MULTIPLIER_MAX);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : DEFAULT_TIME_LIMIT_MULTIPLIER_MAX;
+}
+
+// Pure: turn a measured CPU benchmark time into a time-limit multiplier. Never
+// below 1x (we never shrink a problem's limit) and never above the configured
+// max (so a degenerate probe cannot grant an unbounded run budget).
+function computeTimeLimitMultiplier(benchMs, options = {}) {
+  const env = options.env || process.env;
+  if (!Number.isFinite(benchMs) || benchMs <= 0) return 1;
+  const ratio = benchMs / referenceCpuBenchMs(env);
+  return Math.min(timeLimitMultiplierMax(env), Math.max(1, ratio));
+}
+
+let runtimeCalibrationCache = null;
+
+// Measure this host's CPU throughput once via a child `node -e` benchmark.
+// Memoized; non-blocking; degrades to "no scaling" on any failure.
+function calibrateRuntimeSpeed(options = {}) {
+  const env = options.env || process.env;
+  if (runtimeCalibrationCache) return runtimeCalibrationCache;
+
+  const promise = (async () => {
+    const referenceMs = referenceCpuBenchMs(env);
+    try {
+      const result = await runProcess(process.execPath, ['-e', CPU_BENCH_SCRIPT], {
+        cwd: options.cwd,
+        env: options.spawnEnv,
+        timeoutMs: CPU_BENCH_PROBE_MAX_MS,
+        maxOutputBytes: 4096,
+      });
+      const benchMs = Number(String(result.stdout).trim());
+      const ok = result.exitCode === 0 && !result.timedOut && !result.error
+        && Number.isFinite(benchMs) && benchMs > 0;
+      return {
+        ok,
+        benchMs: ok ? benchMs : null,
+        referenceMs,
+        multiplier: ok ? computeTimeLimitMultiplier(benchMs, { env }) : 1,
+        timedOut: Boolean(result.timedOut),
+        error: result.error,
+      };
+    } catch (error) {
+      return { ok: false, benchMs: null, referenceMs, multiplier: 1, error: error.message };
+    }
+  })();
+
+  runtimeCalibrationCache = promise;
+  return promise;
+}
+
+// Resolve the per-case time-limit multiplier. Precedence:
+//   1. JUDGE_TIME_LIMIT_MULTIPLIER (hard operator override)
+//   2. CPU calibration (unless disabled via JUDGE_RUNTIME_CALIBRATION=off)
+//   3. 1x (no scaling)
+async function resolveTimeLimitMultiplier(options = {}) {
+  const env = options.env || process.env;
+
+  const forced = Number(env && env.JUDGE_TIME_LIMIT_MULTIPLIER);
+  if (Number.isFinite(forced) && forced >= 1) return forced;
+
+  if (!isRuntimeCalibrationEnabled(env)) return 1;
+
+  try {
+    const calibration = await calibrateRuntimeSpeed(options);
+    if (calibration && Number.isFinite(calibration.multiplier)) return calibration.multiplier;
+  } catch {
+    // Fall through to no scaling on any failure.
+  }
+  return 1;
+}
+
+async function warmupRuntimeCalibration(options = {}) {
+  const env = options.env || process.env;
+  if (Number.isFinite(Number(env && env.JUDGE_TIME_LIMIT_MULTIPLIER))) return null;
+  if (!isRuntimeCalibrationEnabled(env)) return null;
+  return calibrateRuntimeSpeed(options);
+}
+
 function normalizeCppLanguage(value) {
   if (value === undefined || value === null || value === '') return DEFAULT_CPP_STANDARD;
   const normalized = String(value).trim().toLowerCase().replace(/\s+/g, '');
@@ -320,15 +435,19 @@ function normalizeRatio(value, fallback = 1) {
   return Math.min(1, Math.max(0.01, value));
 }
 
-function resolveEffectiveTimeLimitMs(problem, judgeOptions, timeLimitMs) {
+function resolveEffectiveTimeLimitMs(problem, judgeOptions, timeLimitMs, timeLimitMultiplier = 1) {
   const strictRatio = judgeOptions.strictTimeLimitRatio !== undefined
     ? normalizeRatio(Number(judgeOptions.strictTimeLimitRatio))
     : hasNoAdditionalTime(problem.timeLimit)
       ? DEFAULT_NO_ADDITIONAL_TIME_RATIO
       : 1;
+  const multiplier = Number.isFinite(timeLimitMultiplier) && timeLimitMultiplier >= 1
+    ? timeLimitMultiplier
+    : 1;
   return {
     strictRatio,
-    effectiveTimeLimitMs: Math.max(1, Math.floor(timeLimitMs * strictRatio)),
+    timeLimitMultiplier: multiplier,
+    effectiveTimeLimitMs: Math.max(1, Math.floor(timeLimitMs * strictRatio * multiplier)),
   };
 }
 
@@ -711,11 +830,18 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     throw new Error('sourceCode is required either in the request or data.json');
   }
 
+  const runtimePlatform = process.platform;
+  const runnerEnv = judgeOptions.env ? { ...process.env, ...judgeOptions.env } : process.env;
+
   const timeLimitMs = judgeOptions.timeLimitMs || parseTimeLimitMs(problem.timeLimit);
-  const { strictRatio, effectiveTimeLimitMs } = resolveEffectiveTimeLimitMs(
+  const timeLimitMultiplier = judgeOptions.timeLimitMultiplier !== undefined
+    ? (Number.isFinite(Number(judgeOptions.timeLimitMultiplier)) ? Math.max(1, Number(judgeOptions.timeLimitMultiplier)) : 1)
+    : await resolveTimeLimitMultiplier({ env: runnerEnv, spawnEnv: judgeOptions.env, cwd: judgeOptions.cwd });
+  const { strictRatio, timeLimitMultiplier: appliedTimeLimitMultiplier, effectiveTimeLimitMs } = resolveEffectiveTimeLimitMs(
     problem,
     judgeOptions,
     timeLimitMs,
+    timeLimitMultiplier,
   );
   const aggregateTimeLimitMs = resolveAggregateTimeLimitMs(
     problem,
@@ -729,8 +855,6 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     memoryPolicy: judgeOptions.memoryPolicy,
   });
   const maxOutputBytes = judgeOptions.maxOutputBytes || DEFAULT_MAX_OUTPUT_BYTES;
-  const runtimePlatform = process.platform;
-  const runnerEnv = judgeOptions.env ? { ...process.env, ...judgeOptions.env } : process.env;
   const tempRoot = resolveTempRoot({
     tempRoot: judgeOptions.tempRoot,
     env: runnerEnv,
@@ -837,6 +961,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
       compileTimeoutMs,
       effectiveTimeLimitMs,
       strictTimeLimitRatio: strictRatio,
+      timeLimitMultiplier: appliedTimeLimitMultiplier,
       aggregateTimeLimitMs,
       aggregateRuntimeMs: Math.round(aggregateRuntimeMs),
       memoryLimitMb,
@@ -873,4 +998,9 @@ module.exports = {
   calibrateCompileEnvironment,
   resolveCompileTimeoutMs,
   warmupCompileCalibration,
+  isRuntimeCalibrationEnabled,
+  computeTimeLimitMultiplier,
+  calibrateRuntimeSpeed,
+  resolveTimeLimitMultiplier,
+  warmupRuntimeCalibration,
 };

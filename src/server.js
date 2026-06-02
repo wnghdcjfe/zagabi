@@ -1,7 +1,7 @@
 'use strict';
 
 const { createApp } = require('./app');
-const { warmupCompileCalibration } = require('./judge');
+const { warmupCompileCalibration, warmupRuntimeCalibration } = require('./judge');
 
 const host = process.env.HOST || '0.0.0.0';
 const port = Number.parseInt(process.env.PORT || '12014', 10);
@@ -35,6 +35,28 @@ server.listen(port, host, () => {
     })
     .catch((error) => {
       console.error(JSON.stringify({ ok: false, service: 'judge_server', compileCalibration: { error: error.message } }));
+    });
+
+  // Calibrate the run-time limit to this machine's CPU speed so correct
+  // solutions do not hit spurious TLE on slow/throttled hosts.
+  warmupRuntimeCalibration()
+    .then((calibration) => {
+      if (!calibration) return;
+      console.log(JSON.stringify({
+        ok: true,
+        service: 'judge_server',
+        runtimeCalibration: {
+          cpuBenchMs: calibration.benchMs,
+          referenceMs: calibration.referenceMs,
+          timeLimitMultiplier: Number.isFinite(calibration.multiplier)
+            ? Math.round(calibration.multiplier * 100) / 100
+            : 1,
+          calibrated: calibration.ok === true,
+        },
+      }));
+    })
+    .catch((error) => {
+      console.error(JSON.stringify({ ok: false, service: 'judge_server', runtimeCalibration: { error: error.message } }));
     });
 });
 

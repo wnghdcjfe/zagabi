@@ -1,5 +1,9 @@
 'use strict';
 
+// Keep judging fixtures fast and verdict-stable across CI hardware: skip the
+// host-speed CPU calibration probe and time-limit scaling during these tests.
+process.env.JUDGE_RUNTIME_CALIBRATION = 'off';
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const http = require('node:http');

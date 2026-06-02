@@ -1,5 +1,11 @@
 'use strict';
 
+// Keep real-judging contract assertions deterministic across CI hardware: the
+// host-speed time-limit calibration would otherwise stretch effectiveTimeLimitMs
+// on slow runners. The runtime-calibration logic is covered explicitly below
+// with pure functions and forced env, not via the shared judging fixtures.
+process.env.JUDGE_RUNTIME_CALIBRATION = 'off';
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -337,6 +343,72 @@ test('calibration probe measures this machine and never lowers the platform budg
     `calibrated budget must not drop below the platform default: ${JSON.stringify(calibration)}`,
   );
   assert.ok(calibration.compileTimeoutMs <= calibration.ceilingMs, JSON.stringify(calibration));
+});
+
+test('time-limit multiplier scales with CPU bench but never shrinks the limit', () => {
+  const { computeTimeLimitMultiplier } = loadJudgeModule();
+
+  // Reference-speed host (300ms default) => 1x, the limit is unchanged.
+  assert.equal(computeTimeLimitMultiplier(300, { env: {} }), 1);
+  // Faster than reference still clamps to 1x (we never tighten a limit).
+  assert.equal(computeTimeLimitMultiplier(150, { env: {} }), 1);
+  // The slow i5 case: ~1800ms bench / 300ms reference => 6x.
+  assert.equal(computeTimeLimitMultiplier(1800, { env: {} }), 6);
+  // Capped at the configurable max (default 10x).
+  assert.equal(computeTimeLimitMultiplier(99999, { env: {} }), 10);
+  assert.equal(computeTimeLimitMultiplier(99999, { env: { JUDGE_TIME_LIMIT_MULTIPLIER_MAX: '20' } }), 20);
+  // Reference time is configurable.
+  assert.equal(computeTimeLimitMultiplier(1200, { env: { JUDGE_REFERENCE_CPU_BENCH_MS: '600' } }), 2);
+  // Non-positive / non-finite bench => no scaling.
+  assert.equal(computeTimeLimitMultiplier(0, { env: {} }), 1);
+  assert.equal(computeTimeLimitMultiplier(NaN, { env: {} }), 1);
+});
+
+test('time-limit multiplier precedence: forced > calibration off > default', async () => {
+  const { resolveTimeLimitMultiplier } = loadJudgeModule();
+
+  // Explicit operator override wins, no benchmark performed.
+  assert.equal(await resolveTimeLimitMultiplier({ env: { JUDGE_TIME_LIMIT_MULTIPLIER: '7' } }), 7);
+  // A forced value below 1 is ignored (cannot tighten); falls through to off/default.
+  assert.equal(
+    await resolveTimeLimitMultiplier({ env: { JUDGE_TIME_LIMIT_MULTIPLIER: '0.5', JUDGE_RUNTIME_CALIBRATION: 'off' } }),
+    1,
+  );
+  // Calibration disabled => 1x, no benchmark performed.
+  assert.equal(await resolveTimeLimitMultiplier({ env: { JUDGE_RUNTIME_CALIBRATION: 'off' } }), 1);
+});
+
+test('effective time limit applies the host multiplier on top of strict ratio', async () => {
+  const { judgeSubmission } = loadJudgeModule();
+  const result = await judgeSubmission({
+    problemId: 'contract-multiplier',
+    sourceCode: addTwoAccepted,
+    language: 'cpp',
+    timeLimit: '2 초 (추가 시간 없음)',
+    memoryLimit: '128 MB',
+    testCases: [{ input: '2 3\n', output: '5\n' }],
+  }, { timeLimitMultiplier: 3 });
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  // base 2000ms * strict 0.75 * multiplier 3 = 4500ms
+  assert.equal(result.summary.timeLimitMs, 2000);
+  assert.equal(result.summary.strictTimeLimitRatio, 0.75);
+  assert.equal(result.summary.timeLimitMultiplier, 3);
+  assert.equal(result.summary.effectiveTimeLimitMs, 4500);
+  assert.equal(result.summary.aggregateTimeLimitMs, 4500);
+});
+
+test('runtime calibration benchmark measures this host without shrinking limits', { timeout: 90_000 }, async (t) => {
+  const { calibrateRuntimeSpeed } = loadJudgeModule();
+  const calibration = await calibrateRuntimeSpeed({ env: { JUDGE_RUNTIME_CALIBRATION: 'on' } });
+
+  if (!calibration.ok) {
+    t.skip(`runtime calibration probe unavailable: ${calibration.error || 'unknown'}`);
+    return;
+  }
+  assert.ok(Number.isFinite(calibration.benchMs) && calibration.benchMs > 0, JSON.stringify(calibration));
+  assert.ok(calibration.multiplier >= 1, `multiplier must never shrink a limit: ${JSON.stringify(calibration)}`);
+  assert.ok(calibration.multiplier <= 10, JSON.stringify(calibration));
 });
 
 test('judge memory policy enforces MLE only on Linux by default', () => {
