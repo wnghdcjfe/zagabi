@@ -58,6 +58,28 @@ server.listen(port, host, () => {
     .catch((error) => {
       console.error(JSON.stringify({ ok: false, service: 'judge_server', runtimeCalibration: { error: error.message } }));
     });
+
+  // Calibrate JVM startup overhead so Java submissions do not hit spurious TLE.
+  try {
+    const { warmupJvmCalibration } = require('./judge-java');
+    warmupJvmCalibration()
+      .then((calibration) => {
+        if (!calibration) return;
+        console.log(JSON.stringify({
+          ok: true,
+          service: 'judge_server',
+          jvmCalibration: {
+            startupMs: calibration.startupMs,
+            calibrated: calibration.ok === true,
+          },
+        }));
+      })
+      .catch((error) => {
+        console.error(JSON.stringify({ ok: false, service: 'judge_server', jvmCalibration: { error: error.message } }));
+      });
+  } catch (error) {
+    console.error(JSON.stringify({ ok: false, service: 'judge_server', jvmCalibration: { error: error.message } }));
+  }
 });
 
 function shutdown(signal) {
