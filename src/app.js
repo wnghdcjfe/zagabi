@@ -99,6 +99,9 @@ function applyCors(req, res, allowedOrigins = DEFAULT_CORS_ORIGINS) {
   );
   res.setHeader('access-control-max-age', '600');
   res.setHeader('vary', 'Origin');
+  if (String(req.headers['access-control-request-private-network'] || '').toLowerCase() === 'true') {
+    res.setHeader('access-control-allow-private-network', 'true');
+  }
   return true;
 }
 
@@ -434,7 +437,7 @@ function createApp(options = {}) {
       const url = getRequestUrl(req);
 
       if (req.method === 'OPTIONS') {
-        if (url.pathname === '/judge') {
+        if (url.pathname === '/' || url.pathname === '/health' || url.pathname === '/judge') {
           optionsResponse(res);
         } else {
           notFound(res);

@@ -162,6 +162,22 @@ test('OPTIONS /judge returns CORS preflight response for allowed origins', async
   }
 });
 
+test('OPTIONS /health supports browser private network preflight', async () => {
+  const response = await request('OPTIONS', '/health', {
+    headers: {
+      origin: 'https://cosal.aviss.kr',
+      'access-control-request-method': 'GET',
+      'access-control-request-private-network': 'true',
+    },
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.body, null);
+  assert.equal(response.headers['access-control-allow-origin'], 'https://cosal.aviss.kr');
+  assert.equal(response.headers['access-control-allow-private-network'], 'true');
+  assert.match(String(response.headers['access-control-allow-methods']), /GET/);
+});
+
 test('disallowed Origin returns flat 403 error', async () => {
   const response = await request('POST', '/judge', {
     headers: { origin: 'http://evil.example' },
