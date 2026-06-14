@@ -274,12 +274,12 @@ test('invalid fields return ret.md flat error response', async () => {
   assert.deepEqual(response.body, { ok: false, error: 'testCases must be a non-empty array' });
 });
 
-test('unsupported language returns C++ only validation error', async () => {
+test('unsupported language returns validation error', async () => {
   const response = await request('POST', '/judge', {
     body: judgePayload({ language: 'python' }),
   });
   assert.equal(response.statusCode, 400);
-  assert.deepEqual(response.body, { ok: false, error: 'only C++ submissions are supported' });
+  assert.deepEqual(response.body, { ok: false, error: 'unsupported language' });
 });
 
 test('validateJudgeRequest normalizes C++20 language for judge module', () => {
@@ -324,4 +324,45 @@ test('runJudge forwards normalized language to judge module', async (t) => {
     judgePath: fakeJudgePath,
   });
   assert.equal(result.verdict, 'accepted');
+});
+
+const javaAcceptedSource = `import java.util.Scanner;
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        long a = sc.nextLong(), b = sc.nextLong();
+        System.out.println(a + b);
+    }
+}`;
+
+test('Java accepted submission returns correct verdict', async () => {
+  const response = await request('POST', '/judge', {
+    body: judgePayload({
+      language: 'java',
+      sourceCode: javaAcceptedSource,
+      timeLimit: '2 초',
+      memoryLimit: '512 MB',
+    }),
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.verdict, 'accepted');
+  assert.ok(Array.isArray(response.body.results));
+  assert.equal(response.body.summary.total, response.body.results.length);
+});
+
+test('normalizeLanguage routes Java to java family', () => {
+  const { normalizeLanguage } = require('../src/app');
+  const result = normalizeLanguage('java');
+  assert.deepEqual(result, { family: 'java', standard: 'java' });
+  const result17 = normalizeLanguage('java17');
+  assert.deepEqual(result17, { family: 'java', standard: 'java17' });
+});
+
+test('normalizeLanguage routes C++ to cpp family', () => {
+  const { normalizeLanguage } = require('../src/app');
+  const result = normalizeLanguage('cpp');
+  assert.deepEqual(result, { family: 'cpp', standard: 'gnu++17' });
+  const nullResult = normalizeLanguage('python');
+  assert.equal(nullResult, null);
 });

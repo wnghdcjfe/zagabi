@@ -55,6 +55,14 @@ const CPP_LANGUAGE_STANDARDS = new Map([
   ['gnu++2a', 'gnu++20'],
 ]);
 
+const JAVA_LANGUAGE_ALIASES = new Map([
+  ['java', 'java'],
+  ['java8', 'java8'],
+  ['java11', 'java11'],
+  ['java17', 'java17'],
+  ['java21', 'java21'],
+]);
+
 class HttpError extends Error {
   constructor(statusCode, code, message, details) {
     super(message);
@@ -208,6 +216,14 @@ function normalizeCppLanguage(value) {
   return CPP_LANGUAGE_STANDARDS.get(language) || null;
 }
 
+function normalizeLanguage(value) {
+  const cpp = normalizeCppLanguage(value);
+  if (cpp) return { family: 'cpp', standard: cpp };
+  const lang = String(value ?? '').trim().toLowerCase();
+  if (JAVA_LANGUAGE_ALIASES.has(lang)) return { family: 'java', standard: JAVA_LANGUAGE_ALIASES.get(lang) };
+  return null;
+}
+
 function resolveTestCases(body) {
   if (body.testCases !== undefined) {
     if (Array.isArray(body.testCases) && body.testCases.length > 0) {
@@ -233,9 +249,9 @@ function validateJudgeRequest(body) {
     throw new HttpError(400, 'INVALID_PROBLEM_ID', 'problemId must be a positive integer');
   }
 
-  const language = normalizeCppLanguage(body.language ?? body.lang);
-  if (!language) {
-    throw new HttpError(400, 'UNSUPPORTED_LANGUAGE', 'only C++ submissions are supported');
+  const langInfo = normalizeLanguage(body.language ?? body.lang);
+  if (!langInfo) {
+    throw new HttpError(400, 'UNSUPPORTED_LANGUAGE', 'unsupported language');
   }
 
   const sourceCode = body.sourceCode ?? body.code ?? body.source_code;
@@ -265,7 +281,8 @@ function validateJudgeRequest(body) {
   return {
     problemId: body.problemId,
     sourceCode,
-    language,
+    language: langInfo.standard,
+    languageFamily: langInfo.family,
     testCases,
     timeLimit: body.timeLimit,
     memoryLimit: body.memoryLimit,
@@ -400,7 +417,10 @@ function formatJudgeResponse(problem, judgeResult) {
 
 async function runJudge({ body, judgePath }) {
   const problem = validateJudgeRequest(body);
-  const judgeModule = loadJudgeModule(judgePath);
+  const resolvedPath = problem.languageFamily === 'java'
+    ? path.resolve(__dirname, 'judge-java')
+    : judgePath;
+  const judgeModule = loadJudgeModule(resolvedPath);
   const judge = resolveJudgeFunction(judgeModule);
   if (!judge) {
     throw new HttpError(503, 'JUDGE_SERVICE_UNAVAILABLE', 'judge service unavailable');
@@ -506,6 +526,7 @@ module.exports = {
   optionsResponse,
   readJsonBody,
   normalizeCppLanguage,
+  normalizeLanguage,
   resolveJudgeFunction,
   resolveCorsOrigins,
   runJudge,

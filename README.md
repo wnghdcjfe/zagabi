@@ -1,11 +1,31 @@
 # 코딩살구클럽 전용 로컬 채점 서버
-로컬 C++ 채점 서버. `data.json` 기반의 JSON HTTP API.
+로컬 C++ / Java 채점 서버. JSON HTTP API.
 
 ## 요구사항
 
 - Node.js 18+
 - npm
 - `g++` (C++ 컴파일러)
+- `javac` / `java` (Java 컴파일러 및 런타임, 선택사항)
+
+### Java 지원
+
+Java 채점을 사용하려면 JDK 8 이상이 설치되어 있어야 합니다. `JAVA_HOME` 환경변수가 설정되어 있으면 해당 JDK를 사용하고, 없으면 PATH에서 `javac`/`java`를 찾습니다.
+
+지원 언어 식별자:
+- `java` — 설치된 JDK 기본 버전
+- `java8`, `java11`, `java17`, `java21` — 특정 버전 타겟팅 (`--release N`)
+
+Java 제출 형식 (BOJ 스타일):
+```java
+import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        // code
+    }
+}
+```
 
 ### Windows C++ 컴파일러
 
@@ -68,6 +88,25 @@ JSON
 ```
 
 코딩살구 웹 클라이언트 호환을 위해 같은 배열을 `samples` 필드로 보내도 채점합니다.
+
+Java 채점 예시:
+
+```bash
+curl -sS -X POST http://127.0.0.1:12014/judge \
+  -H 'content-type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "problemId": 1000,
+  "language": "java",
+  "sourceCode": "import java.util.Scanner; public class Main { public static void main(String[] args) { Scanner sc = new Scanner(System.in); long a = sc.nextLong(), b = sc.nextLong(); System.out.println(a + b); } }",
+  "testCases": [
+    { "input": "2 3\n", "output": "5\n" }
+  ],
+  "timeLimit": "1 초",
+  "memoryLimit": "128 MB"
+}
+JSON
+```
 
 ### 4. `data.json`으로 테스트 → `ret.json` 저장
 
