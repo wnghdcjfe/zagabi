@@ -7,6 +7,8 @@ const DEFAULT_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_CORS_ORIGINS = [
   'http://127.0.0.1:3100',
   'http://localhost:3100',
+  'http://127.0.0.1:3300',
+  'http://localhost:3300',
   'https://cosal.aviss.kr',
 ];
 const DEFAULT_CORS_METHODS = 'GET, POST, OPTIONS';

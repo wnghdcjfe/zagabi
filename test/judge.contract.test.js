@@ -93,6 +93,27 @@ int main(){
 }
 `;
 
+const hideAndSeekAlternativePath = `#include <bits/stdc++.h>
+using namespace std;
+int main(){ cout << "4\\n5 4 8 16 17\\n"; }
+`;
+
+const lisNewlineOutput = `#include <bits/stdc++.h>
+using namespace std;
+int main(){ cout << "4\\n10\\n20\\n30\\n50\\n"; }
+`;
+
+const darwinY1CollisionSource = `#include <stdio.h>
+#include <algorithm>
+#include <queue>
+using namespace std;
+int n, m, x1, y1, x2, y2;
+int main(){
+  scanf("%d %d", &y1, &x1);
+  printf("%d\\n", y1 + x1);
+}
+`;
+
 test('judge contract returns AC for matching C++ output', async (t) => {
   const result = await runJudgeCase(t, addTwoAccepted);
   if (!result) return;
@@ -248,6 +269,40 @@ test('no-additional-time does not aggregate separate testcase process launches',
   assert.equal(result.summary.passed, testCases.length);
 });
 
+test('judge contract accepts alternate shortest path for 13913', async () => {
+  const { judgeSubmission } = loadJudgeModule();
+  const result = await judgeSubmission({
+    problemId: 13913,
+    sourceCode: hideAndSeekAlternativePath,
+    language: 'cpp',
+    timeLimit: '2 초',
+    memoryLimit: '512 MB',
+    testCases: [
+      { input: '5 17\n', output: '4\n5 10 9 18 17\n' },
+    ],
+  });
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  assert.equal(result.cases[0].compareMode, 'special-13913');
+});
+
+test('judge contract accepts valid alternate LIS layout for 14003', async () => {
+  const { judgeSubmission } = loadJudgeModule();
+  const result = await judgeSubmission({
+    problemId: 14003,
+    sourceCode: lisNewlineOutput,
+    language: 'cpp',
+    timeLimit: '3 초',
+    memoryLimit: '512 MB',
+    testCases: [
+      { input: '6\n10 20 10 30 20 50\n', output: '4\n10 20 30 50\n' },
+    ],
+  });
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  assert.match(result.cases[0].compareMode, /^(special-14003|tokens)$/u);
+});
+
 test('judge contract returns WA for mismatched output', async (t) => {
   const result = await runJudgeCase(t, wrongAnswer);
   if (!result) return;
@@ -281,6 +336,42 @@ test('judge contract exposes compiler spawn errors as compile diagnostics', asyn
 
   assert.equal(verdictOf(result), 'CE', JSON.stringify(result, null, 2));
   assert.match(result.compileLog, /spawn|ENOENT|missing/i);
+});
+
+test('known macOS y1 symbol collision is retried without hiding general compile errors', async (t) => {
+  const {
+    judgeSubmission,
+    isDarwinY1CollisionCompileError,
+    applyDarwinY1CompatibilityPatch,
+  } = loadJudgeModule();
+
+  assert.equal(applyDarwinY1CompatibilityPatch('int y1; y1++;'), 'int judge_y1; judge_y1++;');
+  assert.equal(isDarwinY1CollisionCompileError({ stderr: 'plain syntax error' }, 'darwin'), false);
+  assert.equal(isDarwinY1CollisionCompileError({
+    stderr: "main.cpp:6:15: error: redefinition of 'y1' as different kind of symbol\n/usr/include/math.h: note: previous definition is here y1",
+  }, 'darwin'), true);
+  assert.equal(isDarwinY1CollisionCompileError({
+    stderr: "main.cpp:6:15: error: redefinition of 'y1' as different kind of symbol\n/usr/include/math.h: note: previous definition is here y1",
+  }, 'linux'), false);
+
+  if (process.platform !== 'darwin') {
+    t.skip('real y1 collision retry is macOS-specific');
+    return;
+  }
+
+  const result = await judgeSubmission({
+    problemId: 'contract-darwin-y1',
+    sourceCode: darwinY1CollisionSource,
+    language: 'cpp',
+    timeLimit: '1 초',
+    memoryLimit: '128 MB',
+    testCases: [
+      { input: '2 3\n', output: '5\n' },
+    ],
+  });
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  assert.equal(result.compile.compatibilityPatch, 'darwin-y1-symbol-collision');
 });
 
 test('judge contract returns TLE for non-terminating C++', { timeout: 5000 }, async (t) => {

@@ -147,7 +147,7 @@ test('oversized JSON body returns 413', async () => {
 });
 
 test('OPTIONS /judge returns CORS preflight response for allowed origins', async () => {
-  for (const origin of ['http://127.0.0.1:3100', 'https://cosal.aviss.kr']) {
+  for (const origin of ['http://127.0.0.1:3100', 'http://127.0.0.1:3300', 'https://cosal.aviss.kr']) {
     const response = await request('OPTIONS', '/judge', {
       headers: {
         origin,
@@ -165,7 +165,7 @@ test('OPTIONS /judge returns CORS preflight response for allowed origins', async
 test('OPTIONS /health supports browser private network preflight', async () => {
   const response = await request('OPTIONS', '/health', {
     headers: {
-      origin: 'https://cosal.aviss.kr',
+      origin: 'http://127.0.0.1:3300',
       'access-control-request-method': 'GET',
       'access-control-request-private-network': 'true',
     },
@@ -173,7 +173,7 @@ test('OPTIONS /health supports browser private network preflight', async () => {
 
   assert.equal(response.statusCode, 204);
   assert.equal(response.body, null);
-  assert.equal(response.headers['access-control-allow-origin'], 'https://cosal.aviss.kr');
+  assert.equal(response.headers['access-control-allow-origin'], 'http://127.0.0.1:3300');
   assert.equal(response.headers['access-control-allow-private-network'], 'true');
   assert.match(String(response.headers['access-control-allow-methods']), /GET/);
 });

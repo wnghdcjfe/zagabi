@@ -97,6 +97,8 @@ JUDGE_URL=http://127.0.0.1:12014 npm run smoke
 
 - `http://127.0.0.1:3100`
 - `http://localhost:3100`
+- `http://127.0.0.1:3300`
+- `http://localhost:3300`
 - `https://cosal.aviss.kr`
 
 Preflight 확인:

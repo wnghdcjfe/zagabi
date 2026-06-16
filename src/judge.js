@@ -407,6 +407,17 @@ function normalizeSubmissionSource(source) {
     .replace(/[\u200B\u200C\u200D\u2060]/gu, '');
 }
 
+function applyDarwinY1CompatibilityPatch(source) {
+  return String(source).replace(/\by1\b/gu, 'judge_y1');
+}
+
+function isDarwinY1CollisionCompileError(compile, platform = process.platform) {
+  if (platform !== 'darwin') return false;
+  const diagnostics = `${compile?.stderr || ''}\n${compile?.stdout || ''}`;
+  return /redefinition of ['"]y1['"] as different kind of symbol/u.test(diagnostics)
+    && /(?:math\.h|usr\/include)[\s\S]*\by1\b/u.test(diagnostics);
+}
+
 function hasRiskyWindowsPathCharacters(value) {
   return /[^\x20-\x7E]|\s/u.test(String(value || ''));
 }
@@ -725,7 +736,11 @@ function formatCompileLog(compile) {
 
 function buildCaseResult(testCase, index, run, policy = {}) {
   let status;
-  const comparison = compareOutputs(run.stdout, testCase.output);
+  const comparison = compareOutputs(run.stdout, testCase.output, {
+    problemId: policy.problemId,
+    input: testCase.input,
+    floatTolerance: testCase.floatTolerance,
+  });
   const memoryPolicy = policy.memoryPolicy || resolveMemoryPolicy();
   const memoryExceeded = Boolean(
     memoryPolicy.enforced
@@ -909,6 +924,26 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
       compileCommand,
     );
 
+    if (!compile.ok && isDarwinY1CollisionCompileError(compile, runtimePlatform)) {
+      const patchedSource = applyDarwinY1CompatibilityPatch(submissionSource);
+      if (patchedSource !== submissionSource) {
+        await fs.writeFile(sourcePath, patchedSource, 'utf8');
+        const retryCompile = buildCompileSummary(
+          await runProcess(compiler, compileArgs, {
+            cwd: workDir,
+            env: judgeOptions.env,
+            timeoutMs: compileTimeoutMs,
+            maxOutputBytes,
+          }),
+          compileCommand,
+        );
+        retryCompile.compatibilityPatch = 'darwin-y1-symbol-collision';
+        retryCompile.originalStderr = compile.stderr;
+        retryCompile.originalStdout = compile.stdout;
+        compile = retryCompile;
+      }
+    }
+
     if (!compile.ok) {
       verdict = 'CE';
     } else {
@@ -935,6 +970,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
           && aggregateRuntimeMs >= aggregateTimeLimitMs
           && !run.timedOut;
         cases.push(buildCaseResult(testCase, index, run, {
+          problemId: problem.problemId,
           aggregateTimedOut,
           memoryPolicy,
         }));
@@ -982,6 +1018,8 @@ module.exports = {
   resolveMemoryPolicy,
   normalizeOutput,
   normalizeSubmissionSource,
+  applyDarwinY1CompatibilityPatch,
+  isDarwinY1CollisionCompileError,
   resolveSubmissionInput,
   binaryFileNameForPlatform,
   buildDefaultCompileArgs,
