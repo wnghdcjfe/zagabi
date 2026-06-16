@@ -83,6 +83,16 @@ using namespace std;
 int main(){ volatile int x = 0; while(true){ ++x; } }
 `;
 
+const shortWorkAccepted = `#include <bits/stdc++.h>
+using namespace std;
+int main(){
+  auto started = chrono::steady_clock::now();
+  while (chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - started).count() < 20) {}
+  int a,b;
+  if(cin>>a>>b) cout << (a+b) << "\\n";
+}
+`;
+
 test('judge contract returns AC for matching C++ output', async (t) => {
   const result = await runJudgeCase(t, addTwoAccepted);
   if (!result) return;
@@ -220,7 +230,22 @@ test('judge contract tightens no-additional-time limits without changing accepte
   assert.equal(result.summary.timeLimitMs, 2000);
   assert.equal(result.summary.effectiveTimeLimitMs, 1500);
   assert.equal(result.summary.strictTimeLimitRatio, 0.75);
-  assert.equal(result.summary.aggregateTimeLimitMs, 1500);
+  assert.equal(result.summary.aggregateTimeLimitMs, null);
+});
+
+test('no-additional-time does not aggregate separate testcase process launches', async (t) => {
+  const testCases = Array.from({ length: 50 }, () => ({ input: '2 3\n', output: '5\n' }));
+  const result = await runJudgeCase(t, shortWorkAccepted, {
+    timeLimit: '1 초 (추가 시간 없음)',
+    testCases,
+  });
+  if (!result) return;
+
+  assert.equal(verdictOf(result), 'AC', JSON.stringify(result, null, 2));
+  assert.equal(result.summary.effectiveTimeLimitMs, 750);
+  assert.equal(result.summary.aggregateTimeLimitMs, null);
+  assert.equal(result.summary.total, testCases.length);
+  assert.equal(result.summary.passed, testCases.length);
 });
 
 test('judge contract returns WA for mismatched output', async (t) => {
@@ -395,7 +420,7 @@ test('effective time limit applies the host multiplier on top of strict ratio', 
   assert.equal(result.summary.strictTimeLimitRatio, 0.75);
   assert.equal(result.summary.timeLimitMultiplier, 3);
   assert.equal(result.summary.effectiveTimeLimitMs, 4500);
-  assert.equal(result.summary.aggregateTimeLimitMs, 4500);
+  assert.equal(result.summary.aggregateTimeLimitMs, null);
 });
 
 test('runtime calibration benchmark measures this host without shrinking limits', { timeout: 90_000 }, async (t) => {

@@ -458,7 +458,7 @@ function resolveAggregateTimeLimitMs(problem, judgeOptions, effectiveTimeLimitMs
   if (Number.isFinite(judgeOptions.aggregateTimeLimitMs)) {
     return Math.max(1, Math.floor(judgeOptions.aggregateTimeLimitMs));
   }
-  return hasNoAdditionalTime(problem.timeLimit) ? effectiveTimeLimitMs : null;
+  return null;
 }
 
 function normalizeMemoryPolicy(value) {
