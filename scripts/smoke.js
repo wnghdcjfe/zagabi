@@ -31,6 +31,30 @@ const cases = [
     sourceCode: '#include <bits/stdc++.h>\nusing namespace std;\nint main(){ volatile int x = 0; while(true){ ++x; } }\n',
     testCases: [{ input: '', output: 'done\n' }],
   },
+  {
+    name: 'Java AC',
+    expected: 'accepted',
+    language: 'java',
+    sourceCode: 'import java.util.Scanner; public class Main { public static void main(String[] args) { Scanner sc = new Scanner(System.in); long a = sc.nextLong(), b = sc.nextLong(); System.out.println(a + b); } }',
+    timeLimit: '2 초',
+    memoryLimit: '512 MB',
+  },
+  {
+    name: 'Java WA',
+    expected: 'wrong_answer',
+    language: 'java',
+    sourceCode: 'public class Main { public static void main(String[] args) { System.out.println(0); } }',
+    timeLimit: '2 초',
+    memoryLimit: '512 MB',
+  },
+  {
+    name: 'Java CE',
+    expected: 'compilation_error',
+    language: 'java',
+    sourceCode: 'public class Main { invalid Java }',
+    timeLimit: '2 초',
+    memoryLimit: '512 MB',
+  },
 ];
 
 function postJson(path, payload, headers = {}) {
@@ -178,10 +202,10 @@ async function main() {
     for (const item of cases) {
       const response = await postJson('/judge', {
         problemId: 1000,
-        language: 'cpp',
+        language: item.language || 'cpp',
         sourceCode: item.sourceCode,
-        timeLimit: '1 초',
-        memoryLimit: '128 MB',
+        timeLimit: item.timeLimit || '1 초',
+        memoryLimit: item.memoryLimit || '128 MB',
         testCases: item.testCases || [{ input: '2 3\n', output: '5\n' }],
       });
       assert.equal(response.statusCode, 200, `${item.name}: expected HTTP 200, got ${response.statusCode}`);

@@ -2,12 +2,12 @@
   "name": "judge04",
   "version": "0.1.0",
   "private": true,
-  "description": "Local API-only C++ judge demo backed by data.json.",
+  "description": "Local API-only judge server for C++ and Java submissions.",
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/app.js && node --check src/server.js && node --check src/data.js && node --check src/limits.js && node --check src/compare.js && node --check src/processRunner.js && node --check src/judge.js && node --check scripts/smoke.js",
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/data.js && node --check src/limits.js && node --check src/compare.js && node --check src/processRunner.js && node --check src/judge.js && node --check src/judge-java.js && node --check scripts/smoke.js",
     "test": "npm run check && node --test test/*.test.js",
     "smoke": "node scripts/smoke.js"
   },

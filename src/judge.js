@@ -1098,4 +1098,10 @@ module.exports = {
   calibrateRuntimeSpeed,
   resolveTimeLimitMultiplier,
   warmupRuntimeCalibration,
+  buildCaseResult,
+  buildCompileSummary,
+  formatCompileLog,
+  finalVerdictFromCases,
+  resolveEffectiveTimeLimitMs,
+  resolveAggregateTimeLimitMs,
 };

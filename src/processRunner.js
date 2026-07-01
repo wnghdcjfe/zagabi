@@ -188,6 +188,7 @@ function runProcess(command, args = [], options = {}) {
         env: options.env ? { ...process.env, ...options.env } : process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
+        ...(options.detached ? { detached: true } : {}),
       });
     } catch (error) {
       spawnError = error;
@@ -198,7 +199,11 @@ function runProcess(command, args = [], options = {}) {
     timer = setTimeout(() => {
       timedOut = true;
       if (child && !child.killed) {
-        child.kill('SIGKILL');
+        if (options.detached && process.platform !== 'win32') {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { child.kill('SIGKILL'); }
+        } else {
+          child.kill('SIGKILL');
+        }
       }
     }, Math.max(1, timeoutMs));
 
