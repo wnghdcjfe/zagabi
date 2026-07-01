@@ -194,6 +194,7 @@ function calibrateCompileEnvironment(options = {}) {
       sourceFileName,
       binaryFileName,
     });
+    const spawnEnv = withCompilerRuntimePath(options.spawnEnv || env, compiler, platform);
     const cacheKey = `${platform}::${compiler}::${compileArgs.join(' ')}`;
     if (compileCalibrationCache.has(cacheKey)) return compileCalibrationCache.get(cacheKey);
 
@@ -207,7 +208,7 @@ function calibrateCompileEnvironment(options = {}) {
         await fs.writeFile(path.join(workDir, sourceFileName), CALIBRATION_REFERENCE_SOURCE, 'utf8');
         const result = await runProcess(compiler, compileArgs, {
           cwd: workDir,
-          env: options.spawnEnv,
+          env: spawnEnv,
           timeoutMs: CALIBRATION_PROBE_MAX_MS,
           maxOutputBytes: DEFAULT_MAX_OUTPUT_BYTES,
         });
@@ -621,6 +622,41 @@ function windowsPathExts(env = process.env) {
   return ['', ...exts, ...exts.map((ext) => ext.toLowerCase())];
 }
 
+function envPathKey(env = {}, platform = process.platform) {
+  if (Object.prototype.hasOwnProperty.call(env, 'PATH')) return 'PATH';
+  if (Object.prototype.hasOwnProperty.call(env, 'Path')) return 'Path';
+  if (Object.prototype.hasOwnProperty.call(env, 'path')) return 'path';
+  return platform === 'win32' ? 'Path' : 'PATH';
+}
+
+function prependEnvPath(env = process.env, dir, platform = process.platform) {
+  if (!dir) return env;
+
+  const next = { ...env };
+  const key = envPathKey(next, platform);
+  const delimiter = platform === 'win32' ? ';' : path.delimiter;
+  const entries = String(next[key] || '').split(delimiter).filter(Boolean);
+  const hasDir = entries.some((entry) => (
+    platform === 'win32'
+      ? entry.toLowerCase() === dir.toLowerCase()
+      : entry === dir
+  ));
+  next[key] = hasDir ? entries.join(delimiter) : [dir, ...entries].join(delimiter);
+  return next;
+}
+
+function withCompilerRuntimePath(env = process.env, compiler, platform = process.platform) {
+  if (platform !== 'win32') return env;
+
+  const executable = stripWrappingQuotes(compiler || '');
+  const pathApi = path.win32;
+  if (!executable || (!hasPathSeparator(executable) && !pathApi.isAbsolute(executable))) return env;
+
+  const compilerDir = pathApi.dirname(executable);
+  if (!compilerDir || compilerDir === '.') return env;
+  return prependEnvPath(env, compilerDir, platform);
+}
+
 async function canAccessFile(filePath) {
   try {
     await fs.access(filePath, fsConstants.X_OK);
@@ -712,6 +748,7 @@ function buildCompileSummary(result, commandText) {
   return {
     ok: result.exitCode === 0 && !result.timedOut && !result.error,
     command: commandText,
+    executable: result.command,
     exitCode: result.exitCode,
     signal: result.signal,
     timedOut: result.timedOut,
@@ -724,7 +761,24 @@ function buildCompileSummary(result, commandText) {
   };
 }
 
+function isMissingExecutableError(error) {
+  return /\bENOENT\b/i.test(String(error || ''));
+}
+
+function formatMissingCompilerError(compile) {
+  const executable = compile?.executable || 'g++';
+  return [
+    `C++ compiler not found: ${executable}`,
+    'Install g++ or set JUDGE_CXX to the full compiler path before starting the judge server.',
+    compile?.error ? `Original error: ${compile.error}` : '',
+  ].filter(Boolean).join('\n');
+}
+
 function formatCompileLog(compile) {
+  if (isMissingExecutableError(compile?.error)) {
+    return formatMissingCompilerError(compile);
+  }
+
   const details = [
     compile?.stdout,
     compile?.stderr,
@@ -885,6 +939,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     env: runnerEnv,
     platform: runtimePlatform,
   });
+  const compilerRuntimeEnv = withCompilerRuntimePath(runnerEnv, compiler, runtimePlatform);
   const compileArgs = judgeOptions.compileArgs || buildDefaultCompileArgs({
     platform: runtimePlatform,
     language: judgeOptions.language || problem.language,
@@ -897,7 +952,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
   const compileTimeoutMs = await resolveCompileTimeoutMs({
     platform: runtimePlatform,
     env: runnerEnv,
-    spawnEnv: judgeOptions.env,
+    spawnEnv: compilerRuntimeEnv,
     compiler,
     compileArgs,
     sourceFileName: SOURCE_FILE_NAME,
@@ -917,7 +972,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
     compile = buildCompileSummary(
       await runProcess(compiler, compileArgs, {
         cwd: workDir,
-        env: judgeOptions.env,
+        env: compilerRuntimeEnv,
         timeoutMs: compileTimeoutMs,
         maxOutputBytes,
       }),
@@ -931,7 +986,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
         const retryCompile = buildCompileSummary(
           await runProcess(compiler, compileArgs, {
             cwd: workDir,
-            env: judgeOptions.env,
+            env: compilerRuntimeEnv,
             timeoutMs: compileTimeoutMs,
             maxOutputBytes,
           }),
@@ -957,7 +1012,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
           : Math.max(1, Math.min(effectiveTimeLimitMs, remainingAggregateMs));
         const run = await runProcess(binaryCommand, [], {
           cwd: workDir,
-          env: judgeOptions.env,
+          env: compilerRuntimeEnv,
           input: String(testCase.input ?? ''),
           timeoutMs: caseTimeoutMs,
           maxOutputBytes,
@@ -1026,6 +1081,8 @@ module.exports = {
   executableCommandForFile,
   defaultCompileTimeoutMsForPlatform,
   findExecutableOnPath,
+  prependEnvPath,
+  withCompilerRuntimePath,
   resolveTempRoot,
   resolveCompiler,
   stripWrappingQuotes,

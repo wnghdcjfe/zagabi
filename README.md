@@ -9,7 +9,51 @@
 
 ### Windows C++ 컴파일러
 
-윈도우에서는 MinGW-w64/MSYS2의 `g++`를 권장합니다. `g++`가 PATH에 없다면 서버 실행 전에 컴파일러 경로를 지정할 수 있습니다.
+Windows PC에서 C++ 제출을 채점하려면 `g++` 설치가 필수입니다. 서버가 실행 중이어도 Windows에 `g++`가 없으면 제출은 컴파일 에러가 되며, 컴파일 출력에는 보통 아래 메시지가 표시됩니다.
+
+```text
+C++ compiler not found: g++
+spawn g++ ENOENT
+```
+
+이 메시지는 제출 코드 오류가 아니라 채점 서버 PC에 C++ 컴파일러가 없거나, 서버 프로세스가 컴파일러 경로를 모르는 상태라는 뜻입니다.
+
+#### 1. MSYS2와 g++ 설치
+
+윈도우에서는 MinGW-w64/MSYS2의 UCRT64 `g++`를 권장합니다.
+
+1. [MSYS2](https://www.msys2.org/)를 설치합니다.
+2. 시작 메뉴에서 `MSYS2 UCRT64` 터미널을 엽니다.
+3. 아래 명령으로 패키지 목록을 갱신하고 `g++`를 설치합니다.
+
+```bash
+pacman -Syu
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc
+```
+
+`pacman -Syu` 실행 중 터미널을 닫고 다시 열라는 안내가 나오면, `MSYS2 UCRT64`를 다시 열고 같은 명령을 이어서 실행합니다.
+
+#### 2. g++ 설치 확인
+
+설치 후 PowerShell에서 아래 명령을 실행합니다.
+
+```powershell
+& "C:\msys64\ucrt64\bin\g++.exe" --version
+```
+
+버전이 출력되면 설치가 된 것입니다. `where g++`가 실패해도 괜찮습니다. 이 서버는 `JUDGE_CXX`로 컴파일러 절대경로를 지정해서 실행할 수 있습니다.
+
+#### 3. 서버 실행 전 npm 패키지 설치
+
+프로젝트 루트에서 한 번 실행합니다.
+
+```powershell
+npm install
+```
+
+#### 4. JUDGE_CXX를 지정해서 서버 실행
+
+PowerShell에서 서버를 실행할 때는 `JUDGE_CXX`를 `g++.exe`의 전체 경로로 지정합니다.
 
 ```powershell
 $env:JUDGE_CXX="C:\msys64\ucrt64\bin\g++.exe"
@@ -18,6 +62,39 @@ $env:HOST="0.0.0.0"
 $env:PORT="12014"
 npm start
 ```
+
+서버가 이미 실행 중이었다면 반드시 종료 후 다시 시작해야 새 `JUDGE_CXX` 설정이 반영됩니다.
+
+```powershell
+netstat -ano | Select-String ":12014"
+Stop-Process -Id <LISTENING_PID>
+```
+
+MSYS2의 `g++`는 내부적으로 `C:\msys64\ucrt64\bin`의 DLL도 필요합니다. 이 서버는 `JUDGE_CXX`가 절대경로이면 해당 `bin` 폴더를 컴파일 프로세스의 `PATH` 앞에 자동으로 추가합니다. 따라서 일반적으로 Windows 사용자 PATH에 MSYS2 경로를 영구 추가하지 않아도 됩니다.
+
+#### 5. 정상 동작 확인
+
+서버가 뜨면 다른 PowerShell 창에서 헬스체크를 확인합니다.
+
+```powershell
+Invoke-WebRequest -Uri "http://127.0.0.1:12014/health" -UseBasicParsing |
+  Select-Object -ExpandProperty Content
+```
+
+아래처럼 나오면 서버는 살아 있습니다.
+
+```json
+{"ok":true,"service":"judge_server"}
+```
+
+C++ 컴파일과 채점까지 확인하려면 smoke 테스트를 실행합니다.
+
+```powershell
+$env:JUDGE_URL="http://127.0.0.1:12014"
+npm run smoke
+```
+
+정상이라면 `PASS CORS`, `PASS AC`, `PASS WA`, `PASS CE`, `PASS TLE`가 출력됩니다.
 
 - Windows 기본 컴파일 제한은 MinGW/MSYS2 지연을 고려해 30초입니다.
 - 사용자명/Temp 경로에 한글·공백이 있어 `g++`가 파일을 못 여는 경우, 서버는 자동으로 프로젝트의 `.judge-tmp`를 우선 사용합니다. 필요하면 `$env:JUDGE_TEMP_ROOT="C:\judge-tmp"`처럼 직접 지정할 수 있습니다.

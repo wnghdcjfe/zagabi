@@ -2,6 +2,8 @@
 .omx/state/
 .omx/logs/
 .omx/team/
+server-*.log
+server-*.err
 
 # Dependencies / build outputs
 node_modules/

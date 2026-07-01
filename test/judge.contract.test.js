@@ -219,6 +219,7 @@ test('Windows compile defaults avoid slow MinGW and risky temp path failures', (
     defaultCompileTimeoutMsForPlatform,
     resolveTempRoot,
     stripWrappingQuotes,
+    withCompilerRuntimePath,
   } = loadJudgeModule();
 
   assert.equal(defaultCompileTimeoutMsForPlatform('linux', {}), 10_000);
@@ -239,6 +240,22 @@ test('Windows compile defaults avoid slow MinGW and risky temp path failures', (
     cwd: 'C:\\judge04',
     env: { JUDGE_TEMP_ROOT: 'D:\\judge-tmp' },
   }), 'D:\\judge-tmp');
+  assert.equal(
+    withCompilerRuntimePath(
+      { Path: 'C:\\Windows\\System32' },
+      'C:\\msys64\\ucrt64\\bin\\g++.exe',
+      'win32',
+    ).Path,
+    'C:\\msys64\\ucrt64\\bin;C:\\Windows\\System32',
+  );
+  assert.equal(
+    withCompilerRuntimePath(
+      { Path: 'C:\\msys64\\ucrt64\\bin;C:\\Windows\\System32' },
+      'C:\\msys64\\ucrt64\\bin\\g++.exe',
+      'win32',
+    ).Path,
+    'C:\\msys64\\ucrt64\\bin;C:\\Windows\\System32',
+  );
 });
 
 test('judge contract tightens no-additional-time limits without changing accepted output', async (t) => {
@@ -335,6 +352,8 @@ test('judge contract exposes compiler spawn errors as compile diagnostics', asyn
   }, { compiler: path.join(os.tmpdir(), 'definitely-missing-g++') });
 
   assert.equal(verdictOf(result), 'CE', JSON.stringify(result, null, 2));
+  assert.match(result.compileLog, /C\+\+ compiler not found/i);
+  assert.match(result.compileLog, /JUDGE_CXX/i);
   assert.match(result.compileLog, /spawn|ENOENT|missing/i);
 });
 
