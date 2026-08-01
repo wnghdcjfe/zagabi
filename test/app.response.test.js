@@ -274,6 +274,43 @@ test('invalid fields return ret.md flat error response', async () => {
   assert.deepEqual(response.body, { ok: false, error: 'testCases must be a non-empty array' });
 });
 
+// 2870번처럼 아무것도 출력하지 않는 것이 정답인 문제가 있다.
+// 빈 기대 출력을 거부하면 정답 코드가 채점 자체를 못 받는다.
+test('empty expected output is judged instead of rejected', async () => {
+  const silentSource = '#include <bits/stdc++.h>\nint main(){}\n';
+  const response = await request('POST', '/judge', {
+    body: judgePayload({
+      sourceCode: silentSource,
+      testCases: [{ input: '1 2\n', output: '' }],
+    }),
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.verdict, 'accepted');
+  assert.equal(response.body.summary.passed, 1);
+});
+
+test('empty expected output still fails when the program prints something', async () => {
+  const response = await request('POST', '/judge', {
+    body: judgePayload({
+      sourceCode: wrongSource,
+      testCases: [{ input: '1 2\n', output: '' }],
+    }),
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.verdict, 'wrong_answer');
+  assert.equal(response.body.results[0].stdout, '0\n');
+});
+
+test('non-string test case output is still rejected', async () => {
+  const response = await request('POST', '/judge', {
+    body: judgePayload({ testCases: [{ input: '1 2\n', output: 3 }] }),
+  });
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(response.body, { ok: false, error: 'testCases[0].output must be a string' });
+});
+
 test('unsupported language returns C++ only validation error', async () => {
   const response = await request('POST', '/judge', {
     body: judgePayload({ language: 'python' }),

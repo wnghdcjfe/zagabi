@@ -255,8 +255,10 @@ function validateJudgeRequest(body) {
     if (typeof testCase.input !== 'string') {
       throw new HttpError(400, 'INVALID_TEST_CASE_INPUT', `${fieldName}.input must be a string`);
     }
-    if (typeof testCase.output !== 'string' || testCase.output.length === 0) {
-      throw new HttpError(400, 'INVALID_TEST_CASE_OUTPUT', `${fieldName}.output must be a non-empty string`);
+    // 출력이 없는 것이 정답인 문제가 있다(예: 2870번에서 숫자가 없는 입력).
+    // 빈 문자열도 유효한 기대 출력으로 받아들인다.
+    if (typeof testCase.output !== 'string') {
+      throw new HttpError(400, 'INVALID_TEST_CASE_OUTPUT', `${fieldName}.output must be a string`);
     }
     return {
       input: testCase.input,
