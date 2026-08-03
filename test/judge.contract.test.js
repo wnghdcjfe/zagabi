@@ -583,3 +583,45 @@ test('judge memory policy can be forced or disabled explicitly', () => {
   assert.equal(disabled.enforced, false);
   assert.equal(disabled.trackMemory, false);
 });
+
+test('judge contract accepts a correct answer larger than the base capture cap', async (t) => {
+  // A fixed 64KB stdout cap truncated long-but-correct answers mid-stream and
+  // reported them as WA (e.g. BOJ 17298/3653/1620 private cases).
+  const lines = 20000;
+  const expected = `${Array.from({ length: lines }, (_, i) => i + 1).join('\n')}\n`;
+  assert.ok(Buffer.byteLength(expected) > 64 * 1024, 'fixture must exceed the base cap');
+
+  const source = `#include <bits/stdc++.h>
+using namespace std;
+int main(){ ios::sync_with_stdio(false); cin.tie(nullptr); for(int i=1;i<=${lines};i++) cout << i << "\\n"; }
+`;
+  const result = await runJudgeCase(t, source, {
+    timeLimit: '2 초',
+    testCases: [{ input: '\n', output: expected }],
+  });
+  if (!result) return;
+
+  assert.equal(verdictOf(result), 'AC');
+  assert.equal(result.cases[0].stdoutTruncated, false);
+});
+
+test('judge contract still bounds runaway output well below the answer size', async (t) => {
+  // The cap must keep protecting against unbounded output: a program printing
+  // far more than the expected answer is capped instead of buffering forever.
+  const expected = '1\n';
+  const source = `#include <bits/stdc++.h>
+using namespace std;
+int main(){ ios::sync_with_stdio(false); while(true) cout << "9999999999\\n"; }
+`;
+  const result = await runJudgeCase(t, source, {
+    timeLimit: '1 초',
+    testCases: [{ input: '\n', output: expected }],
+  });
+  if (!result) return;
+
+  assert.notEqual(verdictOf(result), 'AC');
+  assert.equal(result.cases[0].stdoutTruncated, true);
+  const captured = Buffer.byteLength(String(result.cases[0].actual ?? ''));
+  assert.ok(captured <= 64 * 1024 + Buffer.byteLength(expected) * 2,
+    `runaway output should stay capped, captured ${captured} bytes`);
+});

@@ -11,6 +11,12 @@ const DEFAULT_DATA_PATH = path.resolve(process.cwd(), 'data.json');
 const DEFAULT_COMPILE_TIMEOUT_MS = 10_000;
 const DEFAULT_WINDOWS_COMPILE_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+// The capture cap doubles as a runaway-output guard, but a fixed cap silently
+// truncates any answer longer than itself and then reports the correct program
+// as a wrong answer. So the per-case cap grows with that case's expected output
+// and only the runaway ceiling stays fixed. Slack above the expected size keeps
+// a genuinely wrong, slightly longer output visible in the diff.
+const MAX_OUTPUT_BYTES_CEILING = 64 * 1024 * 1024;
 const DEFAULT_CPP_STANDARD = 'gnu++17';
 const DEFAULT_NO_ADDITIONAL_TIME_RATIO = 0.75;
 // Adaptive compile timeout. Low-spec machines (e.g. an Intel 1.4GHz i5 with 8GB
@@ -788,6 +794,12 @@ function formatCompileLog(compile) {
   return details.filter(Boolean).join('\n');
 }
 
+function resolveCaseMaxOutputBytes(expectedOutput, baseMaxOutputBytes) {
+  const expectedBytes = Buffer.byteLength(String(expectedOutput ?? ''));
+  const needed = expectedBytes * 2 + baseMaxOutputBytes;
+  return Math.min(MAX_OUTPUT_BYTES_CEILING, Math.max(baseMaxOutputBytes, needed));
+}
+
 function buildCaseResult(testCase, index, run, policy = {}) {
   let status;
   const comparison = compareOutputs(run.stdout, testCase.output, {
@@ -1015,7 +1027,7 @@ async function judgeSubmission(sourceCodeOrRequest, options = {}) {
           env: compilerRuntimeEnv,
           input: String(testCase.input ?? ''),
           timeoutMs: caseTimeoutMs,
-          maxOutputBytes,
+          maxOutputBytes: resolveCaseMaxOutputBytes(testCase.output, maxOutputBytes),
           trackCpuTime: true,
           trackMemory: memoryPolicy.trackMemory,
         });
