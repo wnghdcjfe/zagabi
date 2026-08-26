@@ -26,3 +26,6 @@ tmp/
 # Local OMC / Claude Code runtime metadata (session/orchestration state)
 .omc/
 .claude/
+
+# Local one-off judge verification reports (generated, not tracked)
+bug/
