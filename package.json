@@ -6,8 +6,9 @@
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "check": "node --check src/app.js && node --check src/server.js && node --check src/data.js && node --check src/limits.js && node --check src/compare.js && node --check src/processRunner.js && node --check src/judge.js && node --check scripts/smoke.js",
+    "start": "node scripts/start.js",
+    "start:bare": "node src/server.js",
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/data.js && node --check src/limits.js && node --check src/compare.js && node --check src/processRunner.js && node --check src/judge.js && node --check scripts/smoke.js && node --check scripts/start.js",
     "test": "npm run check && node --test test/*.test.js",
     "smoke": "node scripts/smoke.js"
   },
