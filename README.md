@@ -11,7 +11,10 @@
 
 `JUDGE_CXX`, `JUDGE_COMPILE_TIMEOUT_MS`, `HOST`, `PORT` 를 미리 설정할 필요는 없습니다. `scripts/start.js` 가 대신 확인하고, 문제가 있으면 서버를 켜기 전에 멈춥니다.
 
-![서버 실행 흐름: 컴파일러 확인과 포트 확인을 거쳐 기동, 실패하면 안내 후 중단](docs/diagrams/start-flow.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/start-flow-dark.svg">
+  <img alt="서버 실행 흐름: 컴파일러 확인과 포트 확인을 거쳐 기동, 실패하면 안내 후 중단" src="docs/diagrams/start-flow.svg">
+</picture>
 
 컴파일러가 없는 채로 서버가 뜨면 **모든 제출이 CE로 채점되기 때문에**, 조용히 켜지는 대신 멈추고 설치 방법을 알려 줍니다.
 
@@ -37,7 +40,10 @@
 
 아니요, 그대로 두세요. 기본값 `0.0.0.0` 은 "이 PC의 모든 네트워크 주소로 받는다"는 뜻이라 로컬 주소와 LAN 주소가 **동시에** 열립니다. 특정 IP를 지정하면 오히려 그 주소 하나로 좁아집니다.
 
-![HOST=0.0.0.0 이 여는 두 경로: 선생님 PC는 127.0.0.1, 학생 PC는 공유기를 거쳐 LAN IP로 같은 서버에 접속](docs/diagrams/network.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/network-dark.svg">
+  <img alt="HOST=0.0.0.0 이 여는 두 경로: 선생님 PC는 127.0.0.1, 학생 PC는 공유기를 거쳐 LAN IP로 같은 서버에 접속" src="docs/diagrams/network.svg">
+</picture>
 
 ### g++ 설치(MSYS2)
 
@@ -188,7 +194,10 @@ curl -i -X OPTIONS http://127.0.0.1:12014/judge \
 
 한 번의 `POST /judge` 는 이렇게 처리됩니다.
 
-![POST /judge 처리 흐름: 요청 검증 → g++ 컴파일 1회 → 케이스별 실행·비교 → 첫 실패 케이스의 verdict가 전체 verdict](docs/diagrams/judge-pipeline.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/judge-pipeline-dark.svg">
+  <img alt="POST /judge 처리 흐름: 요청 검증 → g++ 컴파일 1회 → 케이스별 실행·비교 → 첫 실패 케이스의 verdict가 전체 verdict" src="docs/diagrams/judge-pipeline.svg">
+</picture>
 
 모든 응답은 `application/json; charset=utf-8` 입니다.
 
