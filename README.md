@@ -11,15 +11,7 @@
 
 `JUDGE_CXX`, `JUDGE_COMPILE_TIMEOUT_MS`, `HOST`, `PORT` 를 미리 설정할 필요는 없습니다. `scripts/start.js` 가 대신 확인하고, 문제가 있으면 서버를 켜기 전에 멈춥니다.
 
-```mermaid
-flowchart TD
-    A["start-windows.cmd 더블클릭<br/>또는 npm start"] --> B{"g++ 를 실행할 수 있나?"}
-    B -- 없음 --> B1["중단<br/>MSYS2 설치 명령 안내"]
-    B -- 있음 --> C{"포트 12014 가 비어 있나?"}
-    C -- 사용 중 --> C1["중단<br/>기존 서버 종료 방법 안내"]
-    C -- 비어 있음 --> D["접속 주소 출력<br/>127.0.0.1 · LAN IP"]
-    D --> E["채점 서버 기동"]
-```
+![서버 실행 흐름: 컴파일러 확인과 포트 확인을 거쳐 기동, 실패하면 안내 후 중단](docs/diagrams/start-flow.svg)
 
 컴파일러가 없는 채로 서버가 뜨면 **모든 제출이 CE로 채점되기 때문에**, 조용히 켜지는 대신 멈추고 설치 방법을 알려 줍니다.
 
@@ -45,14 +37,7 @@ flowchart TD
 
 아니요, 그대로 두세요. 기본값 `0.0.0.0` 은 "이 PC의 모든 네트워크 주소로 받는다"는 뜻이라 로컬 주소와 LAN 주소가 **동시에** 열립니다. 특정 IP를 지정하면 오히려 그 주소 하나로 좁아집니다.
 
-```mermaid
-flowchart LR
-    T["선생님 PC 브라우저"] -->|"http://127.0.0.1:12014"| J
-    S1["학생 PC"] --> R(("공유기"))
-    S2["학생 PC"] --> R
-    R -->|"http://192.168.0.27:12014"| J
-    J["채점 서버<br/>HOST=0.0.0.0<br/>두 주소를 동시에 받음"]
-```
+![HOST=0.0.0.0 이 여는 두 경로: 선생님 PC는 127.0.0.1, 학생 PC는 공유기를 거쳐 LAN IP로 같은 서버에 접속](docs/diagrams/network.svg)
 
 ### g++ 설치(MSYS2)
 
@@ -203,15 +188,7 @@ curl -i -X OPTIONS http://127.0.0.1:12014/judge \
 
 한 번의 `POST /judge` 는 이렇게 처리됩니다.
 
-```mermaid
-flowchart LR
-    A["POST /judge"] --> B["요청 검증"]
-    B --> C["g++ 컴파일<br/>(1회)"]
-    C -- 실패 --> CE["모든 케이스<br/>compilation_error"]
-    C -- 성공 --> D["테스트케이스마다<br/>실행 → 출력 비교"]
-    D --> V["첫 실패 케이스의 verdict가<br/>전체 verdict<br/>(전부 통과면 accepted)"]
-    CE --> V
-```
+![POST /judge 처리 흐름: 요청 검증 → g++ 컴파일 1회 → 케이스별 실행·비교 → 첫 실패 케이스의 verdict가 전체 verdict](docs/diagrams/judge-pipeline.svg)
 
 모든 응답은 `application/json; charset=utf-8` 입니다.
 

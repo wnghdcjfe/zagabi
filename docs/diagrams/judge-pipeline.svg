@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1334" height="404" viewBox="0 0 1334 404">
+  <rect width="100%" height="100%" fill="#ffffff" rx="8"/>
+  <defs>
+    <marker id="judge-pipeline-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#57606a"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif" fill="#1f2328">
+    <text x="36" y="42" font-size="15" font-weight="600">POST /judge 처리 흐름</text>
+
+    <rect x="30" y="130" width="150" height="64" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text x="105" y="169" font-size="14" text-anchor="middle">POST /judge</text>
+
+    <path d="M 180 162 H 230" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#judge-pipeline-arrow)"/>
+
+    <rect x="230" y="130" width="170" height="64" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text x="315" y="169" font-size="14" text-anchor="middle">요청 검증</text>
+
+    <path d="M 400 162 H 450" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#judge-pipeline-arrow)"/>
+
+    <rect x="450" y="115" width="180" height="94" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text x="540" y="150" font-size="14" text-anchor="middle">
+      <tspan x="540">g++ 컴파일</tspan>
+      <tspan x="540" dy="1.3em">(1회)</tspan>
+    </text>
+
+    <path d="M 630 162 H 700" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#judge-pipeline-arrow)"/>
+    <text x="665" y="148" font-size="13" text-anchor="middle">성공</text>
+
+    <rect x="700" y="115" width="250" height="94" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+    <text x="825" y="150" font-size="14" text-anchor="middle">
+      <tspan x="825">테스트케이스마다</tspan>
+      <tspan x="825" dy="1.3em">실행 → 출력 비교</tspan>
+    </text>
+
+    <path d="M 540 209 V 290" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#judge-pipeline-arrow)"/>
+    <text x="557" y="254" font-size="13">실패</text>
+
+    <rect x="440" y="290" width="200" height="90" rx="8" fill="#fff8f8" stroke="#cf222e"/>
+    <text x="540" y="324" font-size="14" text-anchor="middle">
+      <tspan x="540">모든 케이스</tspan>
+      <tspan x="540" dy="1.3em">compilation_error</tspan>
+    </text>
+
+    <path d="M 950 162 H 1020" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#judge-pipeline-arrow)"/>
+    <path d="M 640 335 H 980 V 205 H 1020" fill="none" stroke="#57606a" stroke-width="1.5" marker-end="url(#judge-pipeline-arrow)"/>
+
+    <rect x="1020" y="95" width="290" height="130" rx="8" fill="#f6fff8" stroke="#1a7f37"/>
+    <text x="1165" y="139" font-size="14" text-anchor="middle">
+      <tspan x="1165">첫 실패 케이스의 verdict가</tspan>
+      <tspan x="1165" dy="1.3em">전체 verdict</tspan>
+      <tspan x="1165" dy="1.3em">(전부 통과면 accepted)</tspan>
+    </text>
+  </g>
+</svg>
