@@ -3,22 +3,13 @@
 로컬 C++ 채점 서버. 요청 본문에 소스코드와 테스트케이스를 담아 보내는 JSON HTTP API입니다.
 필요한 건 **Node.js 18+** 와 **`g++`** 둘뿐이고, 외부 npm 의존성은 없습니다.
 
-## Windows 빠른 실행
+## WindowOS 빠른 실행
 
 1. [Node.js 18+](https://nodejs.org) 설치
 2. MSYS2의 `g++` 설치 → [g++ 설치](#g-설치msys2)
-3. 프로젝트 폴더의 **`start-windows.cmd` 더블클릭** (터미널이면 `npm start`)
-
-`JUDGE_CXX`, `JUDGE_COMPILE_TIMEOUT_MS`, `HOST`, `PORT` 를 미리 설정할 필요는 없습니다. `scripts/start.js` 가 대신 확인하고, 문제가 있으면 서버를 켜기 전에 멈춥니다.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/start-flow-dark.svg">
-  <img alt="서버 실행 흐름: 컴파일러 확인과 포트 확인을 거쳐 기동, 실패하면 안내 후 중단" src="docs/diagrams/start-flow.svg">
-</picture>
-
-컴파일러가 없는 채로 서버가 뜨면 **모든 제출이 CE로 채점되기 때문에**, 조용히 켜지는 대신 멈추고 설치 방법을 알려 줍니다.
-
-정상적으로 뜨면 이런 화면입니다.
+3. 프로젝트 폴더의 **`start-windows.cmd` 더블클릭** (터미널이면 `npm start`) 
+  
+이후 정상적으로 뜨면 이런 화면입니다.
 
 ```text
 코딩살구클럽 채점 서버를 시작합니다.
@@ -33,17 +24,6 @@
 
   종료하려면 Ctrl+C
 ```
-
-`같은 네트워크` 주소가 학생 PC에서 채점 서버로 지정할 주소입니다. 첫 실행 때 Windows 방화벽 창이 뜨면 **개인 네트워크 허용**에 체크해야 다른 PC에서 접속됩니다.
-
-### HOST를 내 IP로 바꿔야 하나요?
-
-아니요, 그대로 두세요. 기본값 `0.0.0.0` 은 "이 PC의 모든 네트워크 주소로 받는다"는 뜻이라 로컬 주소와 LAN 주소가 **동시에** 열립니다. 특정 IP를 지정하면 오히려 그 주소 하나로 좁아집니다.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/network-dark.svg">
-  <img alt="HOST=0.0.0.0 이 여는 두 경로: 선생님 PC는 127.0.0.1, 학생 PC는 공유기를 거쳐 LAN IP로 같은 서버에 접속" src="docs/diagrams/network.svg">
-</picture>
 
 ### g++ 설치(MSYS2)
 
@@ -77,45 +57,8 @@ npm run smoke                                      # 컴파일·채점까지 한
 ```
 
 smoke가 `PASS CORS`, `PASS AC`, `PASS WA`, `PASS CE`, `PASS TLE` 를 출력하면 정상입니다.
-
-### 문제가 생겼을 때
-
-| 증상 | 해결 |
-| --- | --- |
-| 컴파일러를 찾지 못했다고 멈춤 | 위 [g++ 설치](#g-설치msys2) 후 재실행 |
-| 포트가 사용 중이라고 멈춤 | 안내대로 기존 서버 종료, 또는 `$env:PORT="12015"` |
-| 학생 PC에서 접속이 안 됨 | 방화벽에서 Node.js의 개인 네트워크 접근 허용, 같은 공유기인지 확인 |
-| 설정을 바꿨는데 반영 안 됨 | 서버는 시작 시점의 환경변수를 씁니다. Ctrl+C 후 재실행 |
-
-실행 중인 서버를 직접 찾아 끄려면:
-
-```powershell
-Get-NetTCPConnection -LocalPort 12014 -State Listen | Select-Object OwningProcess
-Stop-Process -Id <OwningProcess>
-```
-
-### 선택 환경변수
-
-기본값으로 충분합니다. 아래는 특수한 상황에서만 씁니다.
-
-| 변수 | 기본값 | 설명 |
-| --- | --- | --- |
-| `PORT` | `12014` | 리슨 포트 |
-| `HOST` | `0.0.0.0` | 리슨 주소. 모든 인터페이스 |
-| `JUDGE_CXX` | 자동 탐색 | 표준 경로가 아닌 곳에 g++ 를 설치한 경우에만 |
-| `JUDGE_COMPILE_TIMEOUT_MS` | Windows 30초 | **지정하지 마세요.** 값을 주면 자동 보정이 꺼집니다 |
-| `JUDGE_TEMP_ROOT` | 자동 | 컴파일 임시 폴더 |
-| `JUDGE_SKIP_COMPILER_CHECK` | 없음 | `1` 이면 컴파일러 확인을 건너뛰고 서버를 켬 |
-
-> `JUDGE_COMPILE_TIMEOUT_MS` 주의: Windows 기본 컴파일 제한은 이미 30초이고, 느린 PC에서는 시작할 때 실제 컴파일 속도를 재서 최대 60초까지 자동으로 늘립니다. 직접 지정하면 그 보정이 꺼져 오히려 저사양 PC에서 컴파일 타임아웃이 납니다.
-
-### 그 밖의 참고
-
-- 사용자명/Temp 경로에 한글·공백이 있어 `g++` 가 파일을 못 여는 경우, 서버가 자동으로 프로젝트의 `.judge-tmp` 를 씁니다.
-- 복사한 해설 코드에 붙은 Markdown 코드블록 fence, BOM, NBSP 같은 보이지 않는 문자는 컴파일 전 정리됩니다.
-- `language` 가 `C++20`/`gnu++20` 이면 `-std=gnu++20`, 기본값은 BOJ와 가까운 `-std=gnu++17` 입니다.
-
-## 실행법 (macOS/Linux)
+   
+## MacOS, lunuxOS
 
 ### 1. 서버 실행
 
