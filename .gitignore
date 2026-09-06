@@ -29,3 +29,6 @@ tmp/
 
 # Local one-off judge verification reports (generated, not tracked)
 bug/
+
+# Special judge handoff package (프라이빗 테스트케이스 6MB 포함, 커밋하면 안 됨)
+handoff/
