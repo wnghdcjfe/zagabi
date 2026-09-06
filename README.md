@@ -194,6 +194,7 @@ curl http://127.0.0.1:12014/health
 | `problemId` | O | 양의 정수 |
 | `sourceCode` | O | 비어 있지 않은 문자열. `code`, `source_code` 도 같은 뜻 |
 | `testCases` | O | 비어 있지 않은 배열. `[{ "input": "...", "output": "..." }]`, 둘 다 문자열(빈 문자열 허용). `samples` 로 보내도 됨 |
+| `publicTestCaseCount` | X | 앞에서 몇 개가 공개 샘플인지. 그 뒤 케이스는 프라이빗으로 보고 응답에서 값을 가립니다. 없으면 전부 공개 |
 | `language` | X | 기본 `gnu++17`. `C++20`/`gnu++20` 계열이면 `-std=gnu++20`. C++ 외 언어는 400 |
 | `timeLimit` | X | 예: `"1 초"`, `"2 초 (추가 시간 없음)"` |
 | `memoryLimit` | X | 예: `"128 MB"` |
@@ -220,7 +221,8 @@ curl http://127.0.0.1:12014/health
       "compileOutput": "",
       "message": "",
       "time": "0.012",
-      "memory": null
+      "memory": null,
+      "hidden": false
     }
   ]
 }
@@ -230,6 +232,7 @@ curl http://127.0.0.1:12014/health
 - `time`: 실행 시간(초, 소수 3자리 문자열). 측정 불가면 `null`.
 - `memory`: 피크 메모리(MB, 소수 3자리 문자열). 계측하지 않는 플랫폼에서는 `null`.
 - `message`: [특수 채점](#특수-채점정답이-여러-개인-문제) 문제에서 오답이면 그 사유가 들어갑니다. 그 밖에는 실행 실패 사유이거나 빈 문자열입니다.
+- `hidden`: 프라이빗 테스트케이스면 `true`. 이때 `input`·`expectedOutput`·`stdout`·`stderr` 는 `[hidden]` 으로 내려갑니다. 입력을 그대로 찍는 코드를 내면 `stdout` 만으로 숨긴 입력이 새어 나가므로 제출 프로그램의 출력도 함께 가립니다. `index`·`verdict`·`time`·`memory` 와 특수 채점 사유는 그대로 보여 줍니다.
 - 컴파일 에러면 모든 케이스가 `compilation_error` 가 되고 `compileOutput` 에 컴파일러 메시지가 담깁니다.
 
 ### 에러 응답
