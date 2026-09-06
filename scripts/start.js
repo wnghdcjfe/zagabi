@@ -18,16 +18,43 @@ function log(text = '') {
   console.log(text);
 }
 
+// Some interfaces carry an IPv4 address that no other PC on the LAN can ever
+// reach: 464XLAT/DS-Lite translation addresses on IPv6-only networks, APIPA
+// link-local addresses left over from a failed DHCP, ranges VPN clients park
+// on, /32 interfaces that own no subnet, and virtual adapters for VMs.
+// Printing those as "같은 네트워크" sends students to a dead address.
+const VIRTUAL_IFACE_PATTERN = /^(bridge|vmnet|vboxnet|utun|tun|tap|ppp|awdl|llw)/i;
+
+const SKIP_REASONS = {
+  clat: 'IPv6 전용 네트워크의 IPv4 변환용(464XLAT/DS-Lite) 주소',
+  'link-local': 'DHCP를 받지 못했을 때 붙는 link-local 주소',
+  benchmark: 'VPN·가상 네트워크가 쓰는 대역',
+  'no-subnet': '자기 자신만 가리키는 /32 주소',
+  virtual: '가상머신·VPN용 가상 어댑터',
+};
+
+function skipReason(iface, info) {
+  if (VIRTUAL_IFACE_PATTERN.test(iface)) return 'virtual';
+  if (info.address.startsWith('192.0.0.')) return 'clat';
+  if (info.address.startsWith('169.254.')) return 'link-local';
+  if (info.address.startsWith('198.18.') || info.address.startsWith('198.19.')) return 'benchmark';
+  if (info.netmask === '255.255.255.255') return 'no-subnet';
+  return null;
+}
+
 function lanAddresses() {
-  const addresses = [];
-  for (const infos of Object.values(os.networkInterfaces())) {
+  const usable = [];
+  const skipped = [];
+  for (const [iface, infos] of Object.entries(os.networkInterfaces())) {
     for (const info of infos || []) {
       if (info.internal) continue;
       if (info.family !== 'IPv4' && info.family !== 4) continue;
-      addresses.push(info.address);
+      const reason = skipReason(iface, info);
+      if (reason) skipped.push({ iface, address: info.address, reason });
+      else usable.push({ iface, address: info.address });
     }
   }
-  return addresses;
+  return { usable, skipped };
 }
 
 function installHint(platform) {
@@ -136,12 +163,16 @@ async function main() {
   log('  접속 주소');
   log(`    이 PC        http://127.0.0.1:${PORT}`);
   if (HOST === '0.0.0.0' || HOST === '::') {
-    const addresses = lanAddresses();
-    if (addresses.length === 0) {
-      log('    같은 네트워크  (사용 중인 네트워크 어댑터가 없습니다)');
+    const { usable, skipped } = lanAddresses();
+    for (const entry of usable) {
+      log(`    같은 네트워크  http://${entry.address}:${PORT}`);
     }
-    for (const address of addresses) {
-      log(`    같은 네트워크  http://${address}:${PORT}`);
+    if (usable.length === 0) {
+      log('    같은 네트워크  없음 — 다른 PC에서 접속할 수 있는 IPv4 주소가 없습니다');
+      for (const entry of skipped) {
+        log(`                   ${entry.iface} ${entry.address} 는 ${SKIP_REASONS[entry.reason]}`);
+      }
+      log('                   학생 PC에서는 각자 서버를 띄우고 127.0.0.1 주소를 쓰세요.');
     }
   }
   log(`    헬스체크      http://127.0.0.1:${PORT}/health`);
