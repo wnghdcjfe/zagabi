@@ -65,7 +65,8 @@ const WINDOWS_BINARY_FILE_NAME = 'main.exe';
 // submissions that include it still compile on toolchains that don't ship the
 // header (MSYS2 clang64 g++, MSVC). See runtime-include/bits/stdc++.h.
 const BITS_COMPAT_INCLUDE_DIR = path.join(__dirname, 'runtime-include');
-const VERDICT_PRIORITY = ['TLE', 'MLE', 'RE', 'WA'];
+// IE 가 가장 앞이다. 특수 채점기가 터진 것은 학생의 오답이 아니라 서버 문제이므로 가려지면 안 된다.
+const VERDICT_PRIORITY = ['IE', 'TLE', 'MLE', 'RE', 'WA'];
 const WINDOWS_COMPILER_CANDIDATES = [
   'g++',
   'g++.exe',
@@ -820,11 +821,18 @@ function buildCaseResult(testCase, index, run, policy = {}) {
     status = 'MLE';
   } else if (run.error || run.exitCode !== 0) {
     status = 'RE';
+  } else if (comparison.error === true) {
+    // 특수 채점기가 예외를 던졌다. 서버 버그를 학생의 오답으로 둔갑시키지 않는다.
+    status = 'IE';
   } else if (!comparison.ok) {
     status = 'WA';
   } else {
     status = 'AC';
   }
+
+  // TLE/RE 가 먼저 확정되면 체커는 잘려 나온 출력을 본 것이라 그 사유가 학생을 오도한다.
+  // 판정을 체커가 내린 경우에만 사유를 함께 내려준다.
+  const checkerDecided = status === 'WA' || status === 'IE';
 
   return {
     index: index + 1,
@@ -847,6 +855,7 @@ function buildCaseResult(testCase, index, run, policy = {}) {
     stderrTruncated: run.stderrTruncated,
     error: run.error,
     compareMode: comparison.mode,
+    ...(checkerDecided && comparison.reason ? { compareReason: comparison.reason } : {}),
   };
 }
 

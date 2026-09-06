@@ -1,0 +1,95 @@
+{
+  "comment": [
+    "특수 채점(special judge) 대상 문제 목록이다.",
+    "정답이 유일하지 않은 문제는 문자열 엄격 비교로 채점하면 올바른 풀이가 오답이 된다.",
+    "여기 등재된 문제는 src/checkers 의 체커가 조건을 직접 검증한다.",
+    "mode=float 은 float.js 의 절대/상대 오차 비교기를 쓰고 epsilon 은 지문 출력 규격을 따른다.",
+    "mode=custom 은 src/checkers/{problemId}.js 를 쓴다.",
+    "출처: 코딩살구클럽 저장소(codingsalgu) judge_server/src/checkers/registry.json (2026-09-06 인계).",
+    "문제가 늘어나면 이 표에 한 줄 더하고, custom 이면 체커 파일을 추가한다."
+  ],
+  "problems": [
+    {
+      "problemId": 1007,
+      "mode": "float",
+      "epsilon": 1e-06,
+      "reason": "출력 규격이 절대/상대 오차 10^-6 을 허용한다 (data/problem/1007.json)."
+    },
+    {
+      "problemId": 1064,
+      "mode": "float",
+      "epsilon": 1e-09,
+      "reason": "출력 규격이 절대/상대 오차 10^-9 를 허용한다. 기준 풀이 출력이 지문 samples 5개 전부와 문자열로 다르다."
+    },
+    {
+      "problemId": 1069,
+      "mode": "float",
+      "epsilon": 1e-09,
+      "reason": "출력 규격이 절대/상대 오차 10^-9 를 허용한다 (data/problem/1069.json)."
+    },
+    {
+      "problemId": 1198,
+      "mode": "float",
+      "epsilon": 1e-09,
+      "reason": "출력 규격이 절대/상대 오차 10^-9 를 허용한다 (data/problem/1198.json)."
+    },
+    {
+      "problemId": 1340,
+      "mode": "float",
+      "epsilon": 1e-09,
+      "reason": "출력 규격이 절대/상대 오차 10^-9 를 허용한다 (data/problem/1340.json)."
+    },
+    {
+      "problemId": 1344,
+      "mode": "float",
+      "epsilon": 1e-06,
+      "reason": "출력 규격이 절대/상대 오차 10^-6 을 허용하는 확률이다 (data/problem/1344.json)."
+    },
+    {
+      "problemId": 1546,
+      "mode": "float",
+      "epsilon": 0.01,
+      "reason": "출력 규격이 절대/상대 오차 10^-2 를 허용한다. 지문 samples 가 같은 값을 '75.0', '66.666667', '55.55555555555556' 처럼 서로 다른 자릿수로 제시한다 (data/problem/1546.json)."
+    },
+    {
+      "problemId": 2467,
+      "mode": "custom",
+      "reason": "출력 규격이 \"경우가 두 개 이상일 경우에는 그 중 아무것이나 하나를 출력한다\" 다. 합의 절댓값 최솟값만 유일하다."
+    },
+    {
+      "problemId": 2470,
+      "mode": "custom",
+      "reason": "2467 과 같은 출력 규격이다. 특성값이 정렬돼 있지 않다는 점만 다르다."
+    },
+    {
+      "problemId": 2816,
+      "mode": "custom",
+      "reason": "조작열이 유일하지 않다. 지문 samples[1] 과 samples[2] 가 같은 입력에 서로 다른 출력을 제시한다."
+    },
+    {
+      "problemId": 11780,
+      "mode": "custom",
+      "reason": "최소 비용 경로가 유일하지 않다. 동점 경로가 있으면 구현마다 다른 경로를 낸다. 비용 행렬만 유일하다."
+    },
+    {
+      "problemId": 12852,
+      "mode": "custom",
+      "reason": "출력 규격이 \"정답이 여러 가지인 경우에는 아무거나 출력한다\" 다. 최소 연산 횟수만 유일하다."
+    },
+    {
+      "problemId": 13913,
+      "mode": "custom",
+      "reason": "경로가 유일하지 않다. 지문 samples[0] 과 samples[1] 이 같은 입력 5 17 에 서로 다른 경로를 제시한다."
+    },
+    {
+      "problemId": 14002,
+      "mode": "custom",
+      "reason": "출력 규격이 \"그러한 수열이 여러가지인 경우 아무거나 출력한다\" 다. LIS 길이만 유일하다."
+    },
+    {
+      "problemId": 14003,
+      "mode": "custom",
+      "reason": "14002 와 같이 LIS 길이만 유일하고 수열은 여럿일 수 있다. 지문에 자유 선택 문구는 없지만 BOJ 도 스페셜 저지로 채점한다. 기준 풀이는 둘째 줄을 줄바꿈으로 구분해 출력하므로 엄격 비교로는 공백 구분 풀이가 전부 오답이 된다."
+    }
+  ]
+}

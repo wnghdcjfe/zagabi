@@ -307,7 +307,13 @@ function messageForCase(testCase, verdict) {
     if (Number.isInteger(testCase.exitCode)) return `runtime error: exit code ${testCase.exitCode}`;
     return 'runtime error';
   }
-  if (verdict === 'internal_error') return 'internal judge error';
+  if (verdict === 'internal_error') {
+    return testCase.compareReason
+      ? `internal judge error: ${testCase.compareReason}`
+      : 'internal judge error';
+  }
+  // 특수 채점 문제의 오답 사유. 값이 아니라 위치와 개수만 담겨 있어 그대로 학생에게 내려도 된다.
+  if (verdict === 'wrong_answer' && testCase.compareReason) return String(testCase.compareReason);
   return '';
 }
 
