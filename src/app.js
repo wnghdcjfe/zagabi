@@ -11,6 +11,8 @@ const DEFAULT_CORS_ORIGINS = [
   'http://localhost:3300',
   'https://cosal.aviss.kr',
 ];
+// 프라이빗 테스트케이스의 값 자리에 넣는 문자열. 학생 화면에도 그대로 보인다.
+const HIDDEN_PLACEHOLDER = '[hidden]';
 const DEFAULT_CORS_METHODS = 'GET, POST, OPTIONS';
 const DEFAULT_CORS_HEADERS = 'content-type, authorization';
 
@@ -230,6 +232,21 @@ function resolveTestCases(body) {
   throw new HttpError(400, 'INVALID_TEST_CASES', 'testCases must be a non-empty array');
 }
 
+// 브라우저는 testCases = [공개 샘플..., 프라이빗 TC...] 와 그 경계를 함께 보낸다.
+// 지정하지 않으면 전부 공개로 본다(기존 동작).
+function resolvePublicTestCaseCount(body, total) {
+  const raw = body.publicTestCaseCount ?? body.public_test_case_count;
+  if (raw === undefined || raw === null) return total;
+  if (!Number.isInteger(raw) || raw < 0) {
+    throw new HttpError(
+      400,
+      'INVALID_PUBLIC_TEST_CASE_COUNT',
+      'publicTestCaseCount must be a non-negative integer',
+    );
+  }
+  return Math.min(raw, total);
+}
+
 function validateJudgeRequest(body) {
   if (!Number.isInteger(body.problemId) || body.problemId <= 0) {
     throw new HttpError(400, 'INVALID_PROBLEM_ID', 'problemId must be a positive integer');
@@ -271,6 +288,7 @@ function validateJudgeRequest(body) {
     sourceCode,
     language,
     testCases,
+    publicTestCaseCount: resolvePublicTestCaseCount(body, testCases.length),
     timeLimit: body.timeLimit,
     memoryLimit: body.memoryLimit,
   };
@@ -322,11 +340,36 @@ function formatMemory(bytes) {
   return (bytes / (1024 * 1024)).toFixed(3);
 }
 
-function buildRuntimeResult(testCase) {
+// publicTestCaseCount 뒤의 케이스가 프라이빗이다. 값을 지정하지 않은 요청은 전부 공개다.
+function isHiddenCase(problem, index) {
+  const publicCount = Number.isInteger(problem?.publicTestCaseCount)
+    ? problem.publicTestCaseCount
+    : Number.POSITIVE_INFINITY;
+  return index >= publicCount;
+}
+
+// 프라이빗 케이스는 입력·기대 출력뿐 아니라 제출 프로그램의 출력도 가린다.
+// 입력을 그대로 찍는 코드를 내면 stdout 만으로 숨긴 입력이 통째로 새어 나가기 때문이다.
+// 판정 사유(message)는 값이 아니라 위치와 개수만 담으므로 그대로 둔다.
+function hideCaseValues(result) {
+  return {
+    ...result,
+    hidden: true,
+    input: HIDDEN_PLACEHOLDER,
+    expectedOutput: HIDDEN_PLACEHOLDER,
+    stdout: HIDDEN_PLACEHOLDER,
+    stderr: HIDDEN_PLACEHOLDER,
+  };
+}
+
+function buildRuntimeResult(testCase, problem) {
   const verdict = normalizeVerdict(testCase.status);
   const passed = verdict === 'accepted';
-  return {
-    index: Math.max(0, Number(testCase.index || 1) - 1),
+  // 케이스가 스스로 보고한 번호를 쓴다. 배열 순서에 기대면 채점이 중간에 끊긴 응답에서
+  // 공개/프라이빗 경계가 밀린다.
+  const index = Math.max(0, Number(testCase.index || 1) - 1);
+  const result = {
+    index,
     input: text(testCase.input),
     expectedOutput: text(testCase.expected),
     ok: passed,
@@ -339,46 +382,56 @@ function buildRuntimeResult(testCase) {
     message: messageForCase(testCase, verdict),
     time: formatTime(testCase.durationMs),
     memory: formatMemory(testCase.peakMemoryBytes),
+    hidden: false,
   };
+  return isHiddenCase(problem, index) ? hideCaseValues(result) : result;
 }
 
 function buildCompileErrorResults(problem, judgeResult) {
   const compileOutput = text(judgeResult.compileLog || judgeResult.compile?.stderr || judgeResult.stderr);
   const stderr = text(judgeResult.stderr || judgeResult.compile?.stderr);
-  return problem.testCases.map((testCase, index) => ({
-    index,
-    input: testCase.input,
-    expectedOutput: testCase.output,
-    ok: false,
-    passed: false,
-    verdict: 'compilation_error',
-    status: statusForVerdict('compilation_error'),
-    stdout: text(judgeResult.compile?.stdout),
-    stderr,
-    compileOutput,
-    message: compileOutput || 'compilation error',
-    time: formatTime(judgeResult.compile?.durationMs),
-    memory: null,
-  }));
+  return problem.testCases.map((testCase, index) => {
+    const result = {
+      index,
+      input: testCase.input,
+      expectedOutput: testCase.output,
+      ok: false,
+      passed: false,
+      verdict: 'compilation_error',
+      status: statusForVerdict('compilation_error'),
+      stdout: text(judgeResult.compile?.stdout),
+      stderr,
+      compileOutput,
+      message: compileOutput || 'compilation error',
+      time: formatTime(judgeResult.compile?.durationMs),
+      memory: null,
+      hidden: false,
+    };
+    return isHiddenCase(problem, index) ? { ...hideCaseValues(result), compileOutput } : result;
+  });
 }
 
 function buildInternalErrorResults(problem, judgeResult) {
   const message = text(judgeResult?.error || judgeResult?.message || 'internal judge error');
-  return problem.testCases.map((testCase, index) => ({
-    index,
-    input: testCase.input,
-    expectedOutput: testCase.output,
-    ok: false,
-    passed: false,
-    verdict: 'internal_error',
-    status: statusForVerdict('internal_error'),
-    stdout: '',
-    stderr: '',
-    compileOutput: '',
-    message,
-    time: null,
-    memory: null,
-  }));
+  return problem.testCases.map((testCase, index) => {
+    const result = {
+      index,
+      input: testCase.input,
+      expectedOutput: testCase.output,
+      ok: false,
+      passed: false,
+      verdict: 'internal_error',
+      status: statusForVerdict('internal_error'),
+      stdout: '',
+      stderr: '',
+      compileOutput: '',
+      message,
+      time: null,
+      memory: null,
+      hidden: false,
+    };
+    return isHiddenCase(problem, index) ? hideCaseValues(result) : result;
+  });
 }
 
 function formatJudgeResponse(problem, judgeResult) {
@@ -386,7 +439,7 @@ function formatJudgeResponse(problem, judgeResult) {
   const results = internalVerdict === 'compilation_error'
     ? buildCompileErrorResults(problem, judgeResult || {})
     : Array.isArray(judgeResult?.cases) && judgeResult.cases.length > 0
-      ? judgeResult.cases.map(buildRuntimeResult)
+      ? judgeResult.cases.map((testCase) => buildRuntimeResult(testCase, problem))
       : buildInternalErrorResults(problem, judgeResult || {});
 
   const passed = results.filter((result) => result.passed).length;

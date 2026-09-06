@@ -362,3 +362,105 @@ test('runJudge forwards normalized language to judge module', async (t) => {
   });
   assert.equal(result.verdict, 'accepted');
 });
+
+const echoInputSource = `#include <bits/stdc++.h>
+using namespace std;
+int main(){ string line; while (getline(cin, line)) cout << line << "\\n"; }
+`;
+
+test('publicTestCaseCount hides the values of private test cases', async () => {
+  const response = await request('POST', '/judge', {
+    body: judgePayload({ publicTestCaseCount: 1 }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.verdict, 'accepted');
+
+  const [publicCase, privateCase] = response.body.results;
+  assert.equal(publicCase.hidden, false);
+  assert.equal(publicCase.input, '1 2\n');
+  assert.equal(publicCase.expectedOutput, '3\n');
+  assert.equal(publicCase.stdout, '3\n');
+
+  assert.equal(privateCase.hidden, true);
+  assert.equal(privateCase.input, '[hidden]');
+  assert.equal(privateCase.expectedOutput, '[hidden]');
+  assert.equal(privateCase.stdout, '[hidden]');
+  assert.equal(privateCase.stderr, '[hidden]');
+  // 판정과 계측값은 가리지 않는다. 학생이 어느 케이스에서 틀렸는지는 알아야 한다.
+  assert.equal(privateCase.index, 1);
+  assert.equal(privateCase.verdict, 'accepted');
+});
+
+test('a program that echoes stdin cannot leak a private test case', async () => {
+  const response = await request('POST', '/judge', {
+    body: judgePayload({
+      sourceCode: echoInputSource,
+      testCases: [
+        { input: 'public\n', output: 'public\n' },
+        { input: 'SECRET-INPUT\n', output: 'SECRET-INPUT\n' },
+      ],
+      publicTestCaseCount: 1,
+    }),
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.doesNotMatch(JSON.stringify(response.body), /SECRET-INPUT/u, '프라이빗 입력이 응답에 남아 있다');
+});
+
+test('private test case values stay hidden on compile and internal errors', async () => {
+  const compileError = await request('POST', '/judge', {
+    body: judgePayload({ sourceCode: compileErrorSource, publicTestCaseCount: 1 }),
+  });
+  assert.equal(compileError.body.verdict, 'compilation_error');
+  assert.equal(compileError.body.results[0].input, '1 2\n');
+  assert.equal(compileError.body.results[1].hidden, true);
+  assert.equal(compileError.body.results[1].input, '[hidden]');
+  assert.equal(compileError.body.results[1].expectedOutput, '[hidden]');
+  // 컴파일러 메시지는 케이스별 값이 아니므로 가리지 않는다.
+  assert.ok(compileError.body.results[1].compileOutput.length > 0);
+
+  const { formatJudgeResponse } = require('../src/app');
+  const internalError = formatJudgeResponse(
+    {
+      problemId: 1000,
+      publicTestCaseCount: 1,
+      testCases: [
+        { input: '1 2\n', output: '3\n' },
+        { input: 'SECRET\n', output: 'SECRET\n' },
+      ],
+    },
+    { verdict: 'IE', cases: [] },
+  );
+  assert.equal(internalError.results[1].hidden, true);
+  assert.doesNotMatch(JSON.stringify(internalError), /SECRET/u);
+});
+
+test('requests without publicTestCaseCount keep every case public', async () => {
+  const response = await request('POST', '/judge', { body: judgePayload() });
+  assert.equal(response.body.results.length, 2);
+  assert.equal(response.body.results[0].hidden, false);
+  assert.equal(response.body.results[1].hidden, false);
+  assert.equal(response.body.results[1].input, '10 -4\n');
+});
+
+test('publicTestCaseCount must be a non-negative integer', async () => {
+  const response = await request('POST', '/judge', {
+    body: judgePayload({ publicTestCaseCount: -1 }),
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.error, 'publicTestCaseCount must be a non-negative integer');
+
+  const fractional = await request('POST', '/judge', {
+    body: judgePayload({ publicTestCaseCount: 1.5 }),
+  });
+  assert.equal(fractional.statusCode, 400);
+
+  // 케이스 수보다 크면 전부 공개로 본다. 제출을 거절할 일은 아니다.
+  const tooLarge = await request('POST', '/judge', {
+    body: judgePayload({ publicTestCaseCount: 99 }),
+  });
+  assert.equal(tooLarge.statusCode, 200);
+  assert.equal(tooLarge.body.results[1].hidden, false);
+});
